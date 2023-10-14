@@ -66,7 +66,7 @@
                                 gethash-impl
                                 puthash-impl
                                 remhash-impl
-                                clrhash-impl
+                                hash-fun-state
                                 test
                                 test-fun
                                 hash-fun
@@ -77,10 +77,18 @@
                                 next-vector
                                 hash-vector)))
 
-  (gethash-impl #'error :type (sfunction * (values t boolean)) :read-only t)
-  (puthash-impl #'error :type (sfunction * t) :read-only t)
-  (remhash-impl #'error :type (sfunction * t) :read-only t)
-  (clrhash-impl #'error :type (sfunction * t) :read-only t)
+  (gethash-impl #'error :type (sfunction * (values t boolean)))
+  (puthash-impl #'error :type (sfunction * t))
+  (remhash-impl #'error :type (sfunction * t))
+  ;; If non-zero, this is passed to HASH-FUN as its second argument.
+  ;; The same HASH-FUN-STATE cannot be an argument for the same
+  ;; HASH-FUN. Thus, it completely identifies the hash function. It
+  ;; may be changed during the lifetime of the hash table, which
+  ;; allows us to do adaptive hashing.
+  (hash-fun-state 0
+   ;; HASH-FUN-STATE easily fits into a fixnum, but this type allows
+   ;; EQ-HASH/TINY to avoid an arithmetic shift in assembly.
+   :type (signed-byte #.sb-vm:n-word-bits))
   ;; The Key-Value pair vector.
   ;; Note: this vector has a "high water mark" which resembles a fill
   ;; pointer, but unlike a fill pointer, GC can ignore elements
@@ -131,8 +139,8 @@
   (test-fun nil :type function :read-only t)
   ;; The function used to compute the hashing of a key. Returns two
   ;; values: the index hashing and T if that might change with the
-  ;; next GC.
-  (hash-fun nil :type function :read-only t)
+  ;; next GC. It may take HASH-FUN-STATE as an extra argument.
+  (hash-fun nil :type function)
 
   ;; The type of hash table this is. Part of the exported interface,
   ;; as well as needed for the MAKE-LOAD-FORM and PRINT-OBJECT methods.
@@ -178,7 +186,7 @@
                                 gethash-impl
                                 puthash-impl
                                 remhash-impl
-                                clrhash-impl
+                                hash-fun-state
                                 test
                                 test-fun
                                 hash-fun
@@ -231,8 +239,8 @@
 
 (sb-xc:defmacro make-system-hash-table (&key test synchronized weakness)
   (multiple-value-bind (kind args)
-      (cond ((equal test '(quote eq))  (values 0 '('eq  #'eq  #'eq-hash)))
-            ((equal test '(quote eql)) (values 1 '('eql #'eql #'eql-hash)))
+      (cond ((equal test '(quote eq))  (values 0 '('eq  #'eq  #'adaptive-eq-hash 0)))
+            ((equal test '(quote eql)) (values 1 '('eql #'eql #'eql-hash 0)))
             (t
              (bug "Incomplete implementation of MAKE-SYSTEM-HASH-TABLE")
              0))

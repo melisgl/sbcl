@@ -1144,6 +1144,10 @@
 (defknown hash-table-size (hash-table) index (flushable))
 (defknown hash-table-test (hash-table) function-designator (foldable flushable))
 (defknown (sxhash psxhash) (t) hash-code (foldable flushable))
+(defknown sb-impl::adaptive-equal-hash (t t) (values fixnum boolean)
+    (foldable flushable))
+(defknown sb-impl::adaptive-equalp-hash (t t) (values fixnum boolean)
+    (foldable flushable))
 (defknown hash-table-equalp (hash-table hash-table) boolean (foldable flushable))
 (defknown sb-impl::install-hash-table-lock (hash-table) sb-thread:mutex ())
 ;; To avoid emitting code to test for nil-function-returned

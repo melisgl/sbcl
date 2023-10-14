@@ -186,7 +186,9 @@
     (assert (= 0 (hash-table-count map)))))
 
 (with-test (:name :clrhash-clears-rehash-p)
-  (let ((tbl (make-hash-table)))
+  (let ((tbl (make-hash-table
+              ;; Large enough that's it's not flat.
+              :size 128)))
     (dotimes (i 10)
       (setf (gethash (cons 'foo (gensym)) tbl) 1))
     (gc)
@@ -229,7 +231,7 @@
            (ash (sb-kernel:get-header-data (sb-impl::hash-table-pairs ht))
                 (- sb-vm:array-flags-data-position))))
     ;; verify that EQ hashing on symbols is address-sensitive
-    (let ((h (make-hash-table :test 'eq)))
+    (let ((h (make-hash-table :test 'eq :size 128)))
       (setf (gethash 'foo h) 1)
       (assert (logtest (kv-flag-bits h) sb-vm:vector-addr-hashing-flag)))
     (let ((h (make-hash-table :test 'eq :hash-function 'sb-kernel:symbol-hash)))
@@ -242,7 +244,7 @@
     ;; and that function doesn't exist on 32-bit (but should!)
     #+64-bit
     (dolist (test '(eq eql equal equalp))
-      (let ((h (make-hash-table :test test)))
+      (let ((h (make-hash-table :test test :size 128)))
         (setf (gethash #'car h) 1)
         (assert (logtest (kv-flag-bits h) sb-vm:vector-addr-hashing-flag)))
       (let ((h (make-hash-table :test test :hash-function

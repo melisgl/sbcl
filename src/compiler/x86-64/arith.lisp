@@ -3800,3 +3800,33 @@
   (def range<= nil nil)
   (def range<<= t nil)
   (def range<=< nil t))
+
+
+;;;; FIXME: not finished
+
+(defknown zero-or-one ((unsigned-byte 32))
+    (integer 0 1)
+    (flushable))
+
+#-x86-64
+(declaim (inline zero-or-one))
+(defun zero-or-one (x)
+  (if (zerop x) 0 1))
+
+(define-vop (zero-or-one/ub32)
+  (:translate zero-or-one)
+  (:policy :fast-safe)
+  (:args (arg :scs (unsigned-reg) ;; :target res
+              ))
+  (:arg-types unsigned-num)
+  (:results (res :scs (unsigned-reg)))
+  (:result-types unsigned-num)
+  (:generator 1
+   (cond ((location= res arg)
+          (inst test arg arg)
+          (inst mov arg 0)
+          (inst set :nz arg))
+         (t
+          (inst xor res res)
+          (inst test arg arg)
+          (inst set :nz res)))))
