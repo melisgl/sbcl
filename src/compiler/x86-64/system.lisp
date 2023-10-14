@@ -199,15 +199,6 @@
         (setf byte 2))
       (inst test :byte (ea (- byte other-pointer-lowtag) array) mask))))
 
-(define-vop (pointer-hash)
-  (:translate pointer-hash)
-  (:args (ptr :scs (any-reg descriptor-reg) :target res))
-  (:results (res :scs (any-reg descriptor-reg)))
-  (:policy :fast-safe)
-  (:generator 1
-    (move res ptr)
-    (inst and res (lognot fixnum-tag-mask))))
-
 ;;;; allocation
 
 (define-vop (binding-stack-pointer-sap)
