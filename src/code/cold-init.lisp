@@ -169,6 +169,8 @@
   ;; And now *CURRENT-THREAD*
   (sb-thread::init-main-thread)
 
+  (show-and-call !hash-table-cold-init)
+
   ;; not sure why this is needed on some architectures. Dark magic.
   (setf (fdefn-fun (find-or-create-fdefn '%coerce-callable-for-call))
         #'%coerce-callable-to-fun)
