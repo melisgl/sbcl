@@ -762,8 +762,7 @@ multiple threads accessing the same hash-table without locking."
                 (aref index-vector bucket) i))))
 
 (defun rehash (kv-vector hash-vector index-vector next-vector table
-               &aux (mask (1- (length index-vector)))
-                    (next-free 0)
+               &aux (next-free 0)
                     (hwm (kv-vector-high-water-mark kv-vector)))
   (declare (simple-vector kv-vector)
            (type (simple-array hash-table-index (*)) next-vector index-vector)
@@ -779,30 +778,33 @@ multiple threads accessing the same hash-table without locking."
     (cond
       (hash-vector
        ;; Scan backwards so that chains are in ascending index order.
-       (do ((i hwm (1- i))) ((zerop i))
-         (declare (type index/2 i)
-                  (optimize (safety 0)))
-         (with-key (key)
-           (let* ((stored-hash (aref hash-vector i))
-                  (bucket
-                   (cond ((/= stored-hash +magic-hash-vector-value+)
-                          ;; Use the existing hash value (not address-based hash)
-                          (mask-hash (aref hash-vector i) mask))
-                         (t
-                          (mask-hash (eq-hash* key) mask)))))
-             (push-in-chain bucket)))))
+       (let ((mask (1- (length index-vector))))
+         (do ((i hwm (1- i))) ((zerop i))
+           (declare (type index/2 i)
+                    (optimize (safety 0)))
+           (with-key (key)
+             (let* ((stored-hash (aref hash-vector i))
+                    (bucket
+                      (cond ((/= stored-hash +magic-hash-vector-value+)
+                             ;; Use the existing hash value (not address-based hash)
+                             (mask-hash (aref hash-vector i) mask))
+                            (t
+                             (mask-hash (eq-hash* key) mask)))))
+               (push-in-chain bucket))))))
       ((eq (hash-table-test table) 'eql)
-       (do ((i hwm (1- i))) ((zerop i))
-         (declare (type index/2 i)
-                  (optimize (safety 0)))
-         (with-key (key)
-           (push-in-chain (mask-hash (eql-hash-no-memoize key) mask)))))
+       (let ((mask (1- (length index-vector))))
+         (do ((i hwm (1- i))) ((zerop i))
+           (declare (type index/2 i)
+                    (optimize (safety 0)))
+           (with-key (key)
+             (push-in-chain (mask-hash (eql-hash-no-memoize key) mask))))))
       (t
-       (do ((i hwm (1- i))) ((zerop i))
-         (declare (type index/2 i)
-                  (optimize (safety 0)))
-         (with-key (key)
-           (push-in-chain (mask-hash (eq-hash* key) mask)))))))
+       (let ((mask (1- (length index-vector))))
+         (do ((i hwm (1- i))) ((zerop i))
+           (declare (type index/2 i)
+                    (optimize (safety 0)))
+           (with-key (key)
+             (push-in-chain (mask-hash (eq-hash* key) mask))))))))
   ;; This is identical to the calculation of next-free-kv in INSERT-AT.
   (cond ((/= next-free 0) next-free)
         ((= hwm (hash-table-pairs-capacity kv-vector)) 0)
