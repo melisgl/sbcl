@@ -1760,15 +1760,16 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
            (declare (fixnum hash0) (index/2 index))
            ;; Search next-vector chain for a matching key.
            (if eq-test
-               ;; TODO: consider unrolling a few times like in %GETHASH
-               (do ((next index (aref next-vector next)))
-                   ((zerop next))
-                 (declare (type index/2 next))
-                 (let ((i (* 2 next)))
-                   (when (eq key (aref kv-vector i)) ; Found, just replace the value.
-                     (setf (hash-table-cache hash-table) i)
-                     (return-from done (setf (aref kv-vector (1+ i)) value))))
-                 (check-excessive-probes 1))
+               (macrolet ((probe ()
+                            '(progn
+                              (when (zerop index)
+                                (return))
+                              (let ((i (* 2 index)))
+                                (when (eq key (aref kv-vector i))
+                                  (setf (hash-table-cache hash-table) i)
+                                  (return-from done (setf (aref kv-vector (1+ i)) value))))
+                              (ht-probe-advance index))))
+                 (loop (probe) (probe) (probe) (probe) (check-excessive-probes 4)))
                ,(unless (eq std-fn 'eq)
                   `(do ((next index (aref next-vector next)))
                        ((zerop next))
@@ -1796,7 +1797,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                      ((not (fixnump key-index)) (signal-corrupt-hash-table hash-table))
                      (t (return-from done (setf (aref kv-vector (1+ key-index)) value))))))
            ;; Pop a KV slot off the free list
-           (insert-at (hash-table-next-free-kv hash-table)
+           (insert-at (truly-the index/2 (hash-table-next-free-kv hash-table))
                       hash-table key hash address-based-p value))))))
 
 (flet ((insert-at (index hash-table key hash address-based-p value)
