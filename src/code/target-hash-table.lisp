@@ -1040,8 +1040,8 @@ multiple threads accessing the same hash-table without locking."
     ;; Rehash + resize only occurs when:
     ;;  (1) every usable pair was at some point filled (so HWM = SIZE)
     ;;  (2) no cells below HWM are available (so COUNT = SIZE)
-      (aver (= hwm (hash-table-size table)))
-      (when (and (not (hash-table-weak-p table)) (/= (hash-table-count table) hwm))
+      (aver (= hwm (hash-table-pairs-capacity old-kv-vector)))
+      (when (and (not (hash-table-weak-p table)) (/= (hash-table-%count table) hwm))
         ;; If the table is not weak, then every cell pair has to be in use
         ;; as a precondition to resizing. If weak, this might not be true.
         (signal-corrupt-hash-table table))
