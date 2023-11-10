@@ -839,7 +839,7 @@ line break."
           (when possibly-matchable
             (let ((cons-entry
                    (and (consp object)
-                        (sb-impl::gethash/eql (car object) (pp-dispatch-cons-entries table) nil))))
+                        (sb-impl::gethash/eql-hash (car object) (pp-dispatch-cons-entries table) nil))))
               (cond ((not cons-entry) ; impossible, unless you've removed all initial cons entries
                      (dovector (entry (pp-dispatch-entries table) nil)
                        (when (funcall (pprint-dispatch-entry-test-fn
