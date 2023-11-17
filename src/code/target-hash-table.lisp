@@ -1208,13 +1208,19 @@ multiple threads accessing the same hash-table without locking."
           (setf (aref next-vector i) (aref index-vector bucket)
                 (aref index-vector bucket) i)))
      (push-in-chain-and-count-collisions (bucket-index-expr n-collisions)
-       (if (null n-collisions)
-           `(push-in-chain ,bucket-index-expr)
-           `(let* ((bucket (the index ,bucket-index-expr))
-                   (index (aref index-vector bucket)))
-              (incf ,n-collisions (sb-vm::zero-or-one index))
-              (setf (aref next-vector i) index)
-              (setf (aref index-vector bucket) i)))))
+       `(let* ((bucket (the index ,bucket-index-expr))
+               (index (aref index-vector bucket)))
+          (incf ,n-collisions (sb-vm::zero-or-one index))
+          (setf (aref next-vector i) index)
+          (setf (aref index-vector bucket) i)))
+     (with-key-and-updated-next-vector ((key-var) &body body)
+       ;; If KEY-VAR is empty, then push onto the freelist, otherwise
+       ;; invoke BODY.
+       `(let* ((key-index (* 2 i))
+               (,key-var (aref kv-vector key-index)))
+          (if (empty-ht-slot-p ,key-var)
+              (setf (aref next-vector i) next-free next-free i)
+              (progn ,@body)))))
 
 (defun rehash (kv-vector hash-vector index-vector next-vector table
                &aux (next-free 0)
@@ -1223,110 +1229,117 @@ multiple threads accessing the same hash-table without locking."
            (type (simple-array hash-table-index (*)) next-vector index-vector)
            (type (or null (simple-array hash-table-index (*))) hash-vector)
            (optimize (sb-c:insert-array-bounds-checks 0)))
-  (macrolet ((with-key ((key-var) &body body)
-               ;; If KEY-VAR is empty, then push I onto the freelist, otherwise invoke BODY
-               `(let* ((key-index (* 2 i))
-                       (,key-var (aref kv-vector key-index)))
-                  (if (empty-ht-slot-p ,key-var)
-                      (setf (aref next-vector i) next-free next-free i)
-                      (progn ,@body)))))
-    (aver (not (eql (hash-table-hash-fun-state table) -1)))
-    ;; Cases ordered for performance.
-    (cond ((null hash-vector)
-           (if (eq (hash-table-test table) 'eq)
-               (until-hash-fun-stabilizes (table state n-collisions
-                                                 count-collisions-p)
-                 (let ((mask (1- (length index-vector))))
-                   (do ((i hwm (1- i))) ((zerop i))
-                     (declare (type index/2 i)
-                              (optimize (safety 0)))
-                     (with-key (key)
-                       (if count-collisions-p
-                           (push-in-chain-and-count-collisions
-                            (mask-hash (eq-hash* key) mask)
-                            n-collisions)
-                           (push-in-chain (mask-hash (eq-hash* key) mask)))))))
+  (aver (not (eql (hash-table-hash-fun-state table) -1)))
+  ;; Cases ordered for performance.
+  (cond ((null hash-vector)
+         (if (eq (hash-table-test table) 'eq)
+             (until-hash-fun-stabilizes (table state n-collisions
+                                               count-collisions-p)
                (let ((mask (1- (length index-vector))))
                  (do ((i hwm (1- i))) ((zerop i))
                    (declare (type index/2 i)
                             (optimize (safety 0)))
-                   (with-key (key)
-                     (push-in-chain (mask-hash (eql-hash-no-memoize key) mask)))))))
-          ((or (eq (hash-table-hash-fun table) #'adaptive-equal-hash)
-               (eq (hash-table-hash-fun table) #'adaptive-equalp-hash))
-           ;; Use the hashes stored in HASH-VECTOR.
-           (let ((mask (1- (length index-vector)))
-                 (n-collisions 0)
-                 (equalp (eq (hash-table-hash-fun table) #'adaptive-equalp-hash)))
-             (declare (type word n-collisions))
-             (do ((i hwm (1- i))) ((zerop i))
-               (declare (type index/2 i)
-                        (optimize (safety 0)))
-               (with-key (key)
-                 (let* ((stored-hash (aref hash-vector i))
-                        (bucket (if (/= stored-hash +magic-hash-vector-value+)
-                                    stored-hash
-                                    (eq-hash* key))))
-                   (push-in-chain-and-count-collisions
-                    (mask-hash bucket mask) n-collisions))))
-             ;; FIXME: factor this out?
-             (let ((prev-n-collisions n-collisions))
-               (loop
-                 ;; FIXME
-                 while (and (< (* 3 (hash-table-%count table))
-                               (truly-the fixnum (* 4 n-collisions)))
-                            ;; (< 30 n-collisions)
-                            (< (hash-fun-state-as-fixnum table) 32))
-                 do ;; Double the truncation length (DEPTHOID), then
-                    ;; recompute and store the hash for all keys whose
-                    ;; hash was computation was "truncated" (see
-                    ;; %SXHASHS and %PSXHASH).
-                    (setf (hash-table-hash-fun-state table)
-                          (* 2 (truly-the index/2 (hash-table-hash-fun-state table))))
-                    (setq n-collisions 0)
-                    (fill index-vector 0)
-                    (setq next-free 0)
-                    (let ((mask (1- (length index-vector)))
-                          (depthoid (hash-fun-state-as-fixnum table)))
-                      (do ((i hwm (1- i))) ((zerop i))
-                        (declare (type index/2 i)
-                                 (optimize (safety 0)))
-                        (with-key (key)
-                          (let ((bucket
-                                  (let ((stored-hash (aref hash-vector i)))
-                                    (cond ((/= stored-hash +magic-hash-vector-value+)
-                                           ;; %SXHASH and %PSXHASH indicate in this bit whether
-                                           ;; the processing was truncated.
-                                           (when (logbitp #.(1- +max-hash-table-bits+) stored-hash)
-                                             (setq stored-hash
-                                                   (if equalp
-                                                       (adaptive-equalp-hash key depthoid)
-                                                       (adaptive-equal-hash key depthoid)))
-                                             (setf (aref hash-vector i) stored-hash))
-                                           (mask-hash stored-hash mask))
-                                          (t
-                                           (mask-hash (eq-hash* key) mask))))))
-                            (push-in-chain-and-count-collisions bucket n-collisions)))))
-                 while (< n-collisions prev-n-collisions)
-                 do (setq prev-n-collisions n-collisions)))))
-          (t
-           (let ((mask (1- (length index-vector))))
-             (do ((i hwm (1- i))) ((zerop i))
-               (declare (type index/2 i)
-                        (optimize (safety 0)))
-               (with-key (key)
-                 (let* ((stored-hash (aref hash-vector i))
-                        (bucket
-                          (cond ((/= stored-hash +magic-hash-vector-value+)
-                                 ;; Use the existing hash value (not address-based hash)
-                                 (mask-hash (aref hash-vector i) mask))
-                                (t
-                                 (mask-hash (eq-hash* key) mask)))))
-                   (push-in-chain bucket))))))))
+                   (with-key-and-updated-next-vector (key)
+                     (if count-collisions-p
+                         (push-in-chain-and-count-collisions
+                          (mask-hash (eq-hash* key) mask)
+                          n-collisions)
+                         (push-in-chain (mask-hash (eq-hash* key) mask)))))))
+             (let ((mask (1- (length index-vector))))
+               (do ((i hwm (1- i))) ((zerop i))
+                 (declare (type index/2 i)
+                          (optimize (safety 0)))
+                 (with-key-and-updated-next-vector (key)
+                   (push-in-chain (mask-hash (eql-hash-no-memoize key)
+                                             mask)))))))
+        ((let ((hash-fun (hash-table-hash-fun table)))
+           (or (eq hash-fun #'adaptive-equal-hash)
+               (eq hash-fun #'adaptive-equalp-hash)))
+         (let ((mask (1- (length index-vector)))
+               (n-collisions 0))
+           (declare (type word n-collisions))
+           (do ((i hwm (1- i))) ((zerop i))
+             (declare (type index/2 i)
+                      (optimize (safety 0)))
+             (with-key-and-updated-next-vector (key)
+               (let* ((stored-hash (aref hash-vector i))
+                      (hash (if (/= stored-hash +magic-hash-vector-value+)
+                                stored-hash
+                                (eq-hash* key))))
+                 (push-in-chain-and-count-collisions (mask-hash hash mask)
+                                                     n-collisions))))
+           ;; If collisions look bad, double the truncation length and
+           ;; rehash. It would be more correct to base this test on
+           ;; the number of collisions between hashes of truncated
+           ;; keys only, but that's too expensive to compute.
+           (when (and
+                  (< (* 3 (hash-table-%count table))
+                     (truly-the fixnum (* 4 n-collisions)))
+                  ;; A bad or a really unlucky hash function can
+                  ;; trigger the collision test below, so don't double
+                  ;; the ...
+                  ;; (< (hash-table-hash-fun-state table) 128)
+                  )
+             (setq next-free
+                   (truly-the fixnum (double-depthoid-and-rehash
+                                      kv-vector hash-vector index-vector
+                                      next-vector table))))))
+        (t
+         (let ((mask (1- (length index-vector))))
+           (do ((i hwm (1- i))) ((zerop i))
+             (declare (type index/2 i)
+                      (optimize (safety 0)))
+             (with-key-and-updated-next-vector (key)
+               (let* ((stored-hash (aref hash-vector i))
+                      (hash (if (/= stored-hash +magic-hash-vector-value+)
+                                ;; Use the existing hash value (not address-based hash)
+                                stored-hash
+                                (eq-hash* key))))
+                 (push-in-chain (mask-hash hash mask))))))))
   ;; This is identical to the calculation of next-free-kv in INSERT-AT.
   (cond ((/= next-free 0) next-free)
         ((= hwm (hash-table-pairs-capacity kv-vector)) 0)
         (t (1+ hwm))))
+
+(defun double-depthoid-and-rehash (kv-vector hash-vector index-vector
+                                   next-vector table)
+  (declare (simple-vector kv-vector)
+           (type (simple-array hash-table-index (*)) next-vector index-vector)
+           (type (or null (simple-array hash-table-index (*))) hash-vector)
+           (optimize (safety 0)))
+  (let ((next-free 0)
+        (hwm (kv-vector-high-water-mark kv-vector))
+        (mask (1- (length index-vector)))
+        (depthoid (* 2 (truly-the index/2 (hash-fun-state-as-fixnum table)))))
+    ;; Double the truncation length (DEPTHOID).
+    (setf (hash-table-hash-fun-state table) depthoid)
+    (fill index-vector 0)
+    (setq next-free 0)
+    (macrolet
+        ((rehash-truncated (hash-fun-name)
+           `(do ((i hwm (1- i))) ((zerop i))
+              (declare (type index/2 i)
+                       (optimize (safety 0)))
+              (with-key-and-updated-next-vector (key)
+                (let ((hash
+                        (let ((stored-hash (aref hash-vector i)))
+                          (cond ((/= stored-hash +magic-hash-vector-value+)
+                                 ;; %SXHASH and %PSXHASH indicate in this
+                                 ;; bit whether the processing was
+                                 ;; truncated.
+                                 (when (logbitp #.(1- +max-hash-table-bits+)
+                                                stored-hash)
+                                   (setq stored-hash
+                                         (,hash-fun-name key depthoid))
+                                   (setf (aref hash-vector i) stored-hash))
+                                 stored-hash)
+                                (t
+                                 (eq-hash* key))))))
+                  (push-in-chain (mask-hash hash mask)))))))
+      (if (eq (hash-table-hash-fun table) #'adaptive-equal-hash)
+          (rehash-truncated adaptive-equal-hash)
+          (rehash-truncated adaptive-equalp-hash)))
+    next-free))
 
 ;;; Rehash due to key movement, and find KEY at the same time.
 ;;; Finding the key obviates the need for the rehashing thread to loop
