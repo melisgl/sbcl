@@ -284,6 +284,8 @@
       ,default-rehash-size
       1.0)))
 
+(defconstant +max-hash-table-bits+ #-64-bit 29 #+64-bit 31)
+
 ;; Our hash-tables store precomputed hashes to speed rehash and to guard
 ;; the call of the general comparator.
 ;; i.e. we take the value from mumble-hash {SXHASH, EQ-HASH, etc}
@@ -291,4 +293,8 @@
 ;; (As a practical matter, this limits tables to 2^31 bins.)
 ;; Address-sensitive keys can't store a precomputed hash. They instead
 ;; store this value that indicates address-sensitivity.
-(defconstant +magic-hash-vector-value+ #xFFFFFFFF)
+(defconstant +magic-hash-vector-value+
+  (logandc2 #xFFFFFFFF
+            ;; Zero the highest bit in the hash table range for
+            ;; SET-TRUNCATED-HASH-P.
+            (ash 1 (1- +max-hash-table-bits+))))
