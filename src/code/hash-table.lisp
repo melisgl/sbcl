@@ -233,6 +233,7 @@
 ;;; but is not meaningful with a user-provided test or hash function.
 (sb-xc:defmacro pack-ht-flags-kind (x) `(ash ,x 4))
 (defmacro ht-flags-kind (flags) `(ldb (byte 2 4) ,flags))
+(defconstant ht-flags-kind-mask #b110000)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defconstant default-rehash-size $1.5)
