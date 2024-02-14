@@ -2525,6 +2525,11 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                    (aref index-vector bucket) index)))
          value))
 
+  (define-ht-setter puthash/eq-hash/common eq eq-hash/common* t 14)
+  (define-ht-setter puthash/eql-hash eql eql-hash)
+  (define-ht-setter puthash/equal equal equal-hash)
+  (define-ht-setter puthash/equalp equalp equalp-hash)
+  (define-ht-setter puthash/any nil nil)
   (defun puthash/weak (key hash-table value)
     (declare (type hash-table hash-table) (optimize speed))
     (with-weak-hash-table-entry
@@ -2540,11 +2545,6 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                  (neq (weak-kvv-ref kv-vector physical-index) probed-key))
              (signal-corrupt-hash-table hash-table))
             (t value))))
-  (define-ht-setter puthash/eq-hash/common eq eq-hash/common* t 14)
-  (define-ht-setter puthash/eql-hash eql eql-hash)
-  (define-ht-setter puthash/equal equal equal-hash)
-  (define-ht-setter puthash/equalp equalp equalp-hash)
-  (define-ht-setter puthash/any nil nil)
   ;; This rarely used setter is defined last so that it does not
   ;; increase the distance in memory between INSERT-AT and the more
   ;; commonly invoked setters. The effect of this on performance is
