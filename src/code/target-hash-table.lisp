@@ -89,10 +89,6 @@
 
 ;;;; Generic adaptive hashing machinery
 
-(declaim (inline hash-table-hash-fun-state))
-(defun hash-table-hash-fun-state (table)
-  (truly-the fixnum (hash-table-%hash-fun-state table)))
-
 (declaim (ftype (sfunction (t t t)
                            (values (sfunction * (values t boolean))
                                    (sfunction * t)
@@ -104,7 +100,7 @@
            (optimize speed (safety 0)))
   (unless (= (hash-table-hash-fun-state table) hash-fun-state)
     (setf (hash-table-hash-fun table) hash-fun)
-    (setf (hash-table-%hash-fun-state table) hash-fun-state)
+    (setf (hash-table-hash-fun-state table) hash-fun-state)
     (setf (values (hash-table-gethash-impl table)
                   (hash-table-puthash-impl table)
                   (hash-table-remhash-impl table))
@@ -203,160 +199,74 @@
            (values (ldb (byte #.sb-vm:n-word-bits 0) (progn ,@body))
                    (sb-vm:is-lisp-pointer (get-lisp-obj-address ,key))))))))
 
-;;; This is equivalent to the old way of calling PREFUZZ-HASH on
-;;; POINTER-HASH because HASH from GET-LISP-OBJ-ADDRESS is shifted
-;;; here an extra SB-VM:N-FIXNUM-TAG-BITS.
-(defmacro %non-adaptive-eq-hash (address)
-  `(+ (logxor #b11100101010001011010100111
-              (ash ,address #.(- sb-vm:n-fixnum-tag-bits)))
-      (ash ,address #.(- (+ 3 sb-vm:n-fixnum-tag-bits)))
-      (ash ,address #.(- (+ 12 sb-vm:n-fixnum-tag-bits)))
-      (ash ,address #.(- (+ 20 sb-vm:n-fixnum-tag-bits)))))
+;;; EQ hash tables start with this hash function but may switch to
+;;; EQ-HASH/SAFE. Also used by other standard hash tables hashes
+;;; (EQL-HASH, EQUAL-HASH and EQUALP-HASH).
+(define-eq-hash (eq-hash/default eq-hash/default*) (address)
+  ;; This is equivalent to the old way of calling PREFUZZ-HASH on
+  ;; POINTER-HASH because HASH from GET-LISP-OBJ-ADDRESS is shifted
+  ;; here an extra SB-VM:N-FIXNUM-TAG-BITS.
+  ;;
+  ;; This hash is designed to work well with lisp objects (the common
+  ;; case) and tolerably with some immediates (fixnums, characters).
+  ;; It fares badly with SINGLE-FLOATs whose low bits may vary little
+  ;; (which apparently matters to e.g. FASL-OUTPUT-EQ-TABLE).
+  (+ (logxor #b11100101010001011010100111
+             (ash address #.(- sb-vm:n-fixnum-tag-bits)))
+     (ash address #.(- (+ 3 sb-vm:n-fixnum-tag-bits)))
+     (ash address #.(- (+ 12 sb-vm:n-fixnum-tag-bits)))
+     (ash address #.(- (+ 20 sb-vm:n-fixnum-tag-bits)))))
 
-;;; This hash function was historically used both in EQ hash tables
-;;; and as parts of EQL-HASH, EQUAL-HASH and EQUALP-HASH. EQ hash
-;;; tables now adapt their hash function to the actual keys.
-(define-eq-hash (non-adaptive-eq-hash non-adaptive-eq-hash*) (address)
-  (%non-adaptive-eq-hash address))
-
-(defconstant +hft-eq-mid+ 0)
-
-;;; This is a family of hash functions (one for +HFT-EQ-MID+ and one
-;;; for each bit in a WORD).
-(define-eq-hash (eq-hash/common eq-hash/common*) (address state)
-  ;; Instead of having an IF here, we could DEFINE-EQ-HASH
-  ;; EQ-HASH/SMALL and EQ-HASH/MID as separate functions with the
-  ;; corresponding accessors (DEFINE-HT-GETTER, DEFINE-HT-SETTER,
-  ;; DEFINE-REMHASH), but the increased code is a drag on e.g.
-  ;; compiler performance. Crucially, the IF is lifted out of the
-  ;; REHASHing loop by WITH-EQ-HASH*-INLINED.
-  (if (not (eq state +hft-eq-mid+))
-      ;; EQ-HASH/SMALL
-      ;;
-      ;; GUESS-EQ-HASH-FUN may switch to this function.
-      (+ (ash address (- (truly-the (mod #.sb-vm:n-word-bits) state)))
-         ;; 15 is about the number of bits on a gencgc page. The exact
-         ;; value is not that important.
-         (ash address -15))
-      ;; EQ-HASH/MID
-      ;;
-      ;; This was the default and only EQ hash function for a long
-      ;; time, and we still use it as a safer but often slower option
-      ;; than the really aggressive EQ-HASH/SMALL just above.
-      ;;
-      ;; ADAPT-EQ-HASH-FUN-BY-N-COLLISIONS switches to this hash
-      ;; function if there are too many collisions for EQ-HASH/SMALL,
-      ;; but not before +EQ-MIN-N-BUCKETS-FOR-COLLISION-COUNTING+.
-      (%non-adaptive-eq-hash address)))
-
-(defmacro eq-hash/small-state (shift)
-  `(the (integer 1 (#.sb-vm:n-word-bits)) ,shift))
-
-;;; Finally, ADAPT-EQ-HASH-FUN-BY-N-COLLISIONS may switch from
-;;; +HFT-EQ-MID+ from to +HFT-GENERAL+, which should be a safe
-;;; fallback that handles most key distributions gracefully. This
-;;; should be required very rarely, so this is not packed into
-;;; EQ-HASH/COMMON.
-(define-eq-hash (eq-hash/general eq-hash/general*) (address)
+;;; Even though the standard does not require EQ to compare fixnums as
+;;; numbers, it is always meaningful to ask whether they are the same
+;;; object (imagine a trivial implementation INTERSECTION with :TEST
+;;; 'EQ). Thus, EQ hash tables should ideally perform well with all
+;;; kinds of objects.
+;;;
+;;; A hash table may switch its hash function from EQ-HASH/DEFAULT
+;;; from to EQ-HASH/SAFE, which handles most key distributions
+;;; gracefully. This should be required very rarely.
+(define-eq-hash (eq-hash/safe eq-hash/safe*) (address)
   ;; Note that while MURMUR3 is a very good general purpose hash
   ;; function, it's not a cryptographic hash. If resisting
   ;; Denial-of-Service attacks on EQ hash tables were a priority, this
   ;; could be easily replaced at little cost.
   (murmur3-fmix-word address))
 
-(defconstant +eq-min-n-buckets-for-collision-counting+ 128)
-
-;;; Evaluate BODY with all calls to EQ-HASH* replaced by calls to the
-;;; current hash function as determined by STATE. It is assumed that
-;;; the state is not +HFT-FLAT+.
+;;; Evaluate BODY with all calls to EQ-HASH* replaced by inlined calls
+;;; to the current hash function as determined by STATE. It is assumed
+;;; that the state is not +HFT-FLAT+.
 (defmacro with-eq-hash*-inlined ((state &optional count-collisions-p)
                                  &body body)
   `(cond
-     ;; EQ-HASH/SMALL (the first branch of EQ-HASH/COMMON)
-     ((plusp ,state)
+     ((eql ,state +hft-default+)
       (macrolet ((eq-hash* (key)
-                   (list 'eq-hash/common* key ',state)))
-        (let (,@(when count-collisions-p
-                  `((,count-collisions-p
-                     (>= (length index-vector)
-                         +eq-min-n-buckets-for-collision-counting+)))))
-          ,@body)))
-     ;; The second branch of EQ-HASH/COMMON.
-     ((eql ,state +hft-eq-mid+)
-      (macrolet ((eq-hash* (key)
-                   (list 'eq-hash/common* key ',state)))
+                   (list 'eq-hash/default* key)))
+        ;; Currently, we switch away from EQ-HASH/DEFAULT only when
+        ;; the worst case is really bad (upon hitting MAX-CHAIN-LENGTH
+        ;; in DEFINE-HT-SETTER). Counting collision here would handle
+        ;; the average case being bad, but in practice not even the
+        ;; tiny overhead of collision counting is worth it.
         (let (,@(when count-collisions-p
                   `((,count-collisions-p nil
                                          #+nil
                                          (>= (length index-vector) 2048)))))
           ,@body)))
-     ((eql ,state +hft-general+)
+     ((eql ,state +hft-safe+)
       (macrolet ((eq-hash* (key)
-                   (list 'eq-hash/general* key)))
+                   (list 'eq-hash/safe* key)))
         (let (,@(when count-collisions-p `((,count-collisions-p nil))))
           ,@body)))
      (t
       (aver nil))))
-
-(deftype almost-word () '(unsigned-byte #.(1- sb-vm:n-word-bits)))
-
-(declaim (inline almost-word-least-zero-bit))
-;;; Like SB-C::LEAST-ZERO-BIT but assumes that the top bit is zero.
-(defun almost-word-least-zero-bit (x)
-  (declare (type word x))
-  (1- (integer-length (logxor x (1+ x)))))
-
-(defun guess-eq-hash-fun (table)
-  (declare (type hash-table table)
-           (optimize speed (safety 0)))
-  (let* ((kv-vector (hash-table-pairs table))
-         (a-key-address (get-lisp-obj-address (aref kv-vector 2)))
-         (changed-bits 0))
-    (declare (type word changed-bits))
-    (macrolet
-        ((note-changed-bits (key-index)
-           ;; This function is called only when growing a hash table,
-           ;; so there are no empty slots.
-           `(let ((address (get-lisp-obj-address (aref kv-vector ,key-index))))
-              (setq changed-bits (logior changed-bits
-                                         (logxor a-key-address address))))))
-      (loop for key-index upfrom 4 upto 20 by 2 do
-        (note-changed-bits key-index)))
-    (let ((unchanged-bits (ldb (byte #.sb-vm:n-word-bits 0)
-                               (lognot changed-bits))))
-      (set-hash-fun
-       table #'eq-hash/common
-       (if (/= (ldb (byte #.sb-vm:n-fixnum-tag-bits 0) unchanged-bits)
-               #.(1- (ash 1 sb-vm:n-fixnum-tag-bits)))
-           ;; Mix of fixnums and non-fixnums
-           +hft-eq-mid+
-           ;; All fixnums or no fixnums
-           (let* ((min-right-shift
-                    (if (= (ldb (byte #.sb-vm:n-fixnum-tag-bits 0)
-                                (logand unchanged-bits a-key-address))
-                           #.(1- (ash 1 sb-vm:n-fixnum-tag-bits)))
-                        ;; If all the fixnum lowtag bits are 1 for all
-                        ;; the keys, then we know there are no
-                        ;; fixnums, so we don't need any bits below
-                        ;; SB-VM:N-LOWTAG-BITS.
-                        sb-vm:n-lowtag-bits
-                        sb-vm:n-fixnum-tag-bits))
-                  (n (+ min-right-shift
-                        (almost-word-least-zero-bit
-                         (ash unchanged-bits (- min-right-shift))))))
-             (eq-hash/small-state (if (= n 15)
-                                      (1- sb-vm:n-word-bits)
-                                      n))))))))
 
 ;;; Switch to a safer hash function if any. Return whether the hash
 ;;; function was changed.
 (defun fall-back-on-eq-hash (table)
   (declare (optimize (safety 0)))
   (let ((hash-fun-state (hash-table-hash-fun-state table)))
-    (cond ((eql hash-fun-state +hft-eq-mid+)
-           (set-hash-fun table #'eq-hash/general +hft-general+))
-          ((plusp hash-fun-state)
-           (set-hash-fun table #'eq-hash/common +hft-eq-mid+)))))
+    (when (eql hash-fun-state +hft-default+)
+      (set-hash-fun table #'eq-hash/safe +hft-safe+))))
 
 (defun fall-back-on-eq-hash-and-rehash (table key hash)
   (declare (type hash-table table)
@@ -466,7 +376,7 @@
                    (symbol-hash (truly-the symbol key))
                    (number-sxhash (truly-the number key))))
               nil)
-      (non-adaptive-eq-hash key)))
+      (eq-hash/default key)))
 
 
 ;;;; EQUAL and EQUALP hash functions
@@ -526,7 +436,7 @@
                (values (clip-hash (symbol-hash (truly-the symbol key))) nil))
              (equal-hash-sxhash-widetag-p (%other-pointer-widetag key)))))
       (values (clip-hash (sxhash key)) nil)
-      (non-adaptive-eq-hash key)))
+      (eq-hash/default key)))
 
 (defun equalp-hash (key)
   (declare (values fixnum boolean))
@@ -540,7 +450,7 @@
     ;; since STRUCTURE-OBJECT is recursed into by PSXHASH.
     (instance (values (clip-hash (instance-sxhash key)) nil))
     (t
-     (non-adaptive-eq-hash key))))
+     (eq-hash/default key))))
 
 ;;;; user-defined hash table tests
 
@@ -816,7 +726,7 @@ Examples:
                                 (float rehash-threshold $1.0)))) ; always single-float
     (multiple-value-bind (kind test test-fun hash-fun hash-fun-state)
         (cond ((or (eq test #'eq) (eq test 'eq))
-               (values 0 'eq #'eq #'eq-hash/common +hft-eq-mid+))
+               (values 0 'eq #'eq #'eq-hash/default +hft-default+))
               ((or (eq test #'eql) (eq test 'eql))
                (values 1 'eql #'eql #'eql-hash +hft-non-adaptive+))
               ((or (eq test #'equal) (eq test 'equal))
@@ -1320,7 +1230,7 @@ multiple threads accessing the same hash-table without locking."
                                ;; Use the existing hash value (not
                                ;; address-based hash).
                                stored-hash
-                               (non-adaptive-eq-hash* key))))
+                               (eq-hash/default* key))))
                 (push-in-chain (mask-hash hash mask))))))))
   ;; This is identical to the calculation of next-free-kv in
   ;; INSERT-AT.
@@ -1393,7 +1303,7 @@ multiple threads accessing the same hash-table without locking."
                          (cond ((/= stored-hash +magic-hash-vector-value+)
                                 (mask-hash stored-hash mask))
                                (t
-                                (mask-hash (non-adaptive-eq-hash* pair-key)
+                                (mask-hash (eq-hash/default* pair-key)
                                            mask)))))
                   (push-in-chain bucket)))))
            ((eq (hash-table-test table) 'eql)
@@ -1690,12 +1600,8 @@ multiple threads accessing the same hash-table without locking."
                                   (if is-eql
                                       (set-hash-fun table #'eql-hash
                                                     +hft-non-adaptive+)
-                                      (guess-eq-hash-fun table)))
-                                 ((and (weak-eq-std-hash-table-p table)
-                                       ;; Guess at most once.
-                                       (= (length (hash-table-index-vector table))
-                                          16))
-                                  (guess-eq-hash-fun table)))
+                                      (set-hash-fun table #'eq-hash/default
+                                                    +hft-default+))))
                            (rehash new-kv-vector new-hash-vector
                                    new-index-vector new-next-vector table))))))
             (setf (hash-table-pairs table)        new-kv-vector
@@ -1761,15 +1667,14 @@ if there is no such entry. Entries can be added using SETF."
   ;; to keep things simple so that we don't have to pass in the names
   ;; of local variables to bind. (Being unhygienic on purpose)
 
-  (defun ht-hash-setup (hash-fun-name adaptivep)
+  (defun ht-hash-setup (hash-fun-name stateful-hash-p)
     (cond ((null hash-fun-name)
            '((hash (clip-hash (the fixnum
                                (funcall (hash-table-hash-fun hash-table) key))))
              (address-based-p nil)))
-          (adaptivep
+          (stateful-hash-p
            `(((hash address-based-p)
-              ;; Access the state directly else the compiler would box it.
-              (,hash-fun-name key (hash-table-%hash-fun-state hash-table)))))
+              (,hash-fun-name key (hash-table-hash-fun-state hash-table)))))
           (t
            `(((hash address-based-p) (,hash-fun-name key))))))
 
@@ -1969,7 +1874,7 @@ nnnn 01    MMMM __   restart (chains are in an indeterminate state)
 nnnn 1_    any       linear scan (don't try to read when rehash already in progress)
 |#
 
-(defmacro define-ht-getter (name std-fn hash-fun-name &optional adaptivep)
+(defmacro define-ht-getter (name std-fn hash-fun-name &optional stateful-hash-p)
   ;; For synchronized GETHASH we've already acquired the lock,
   ;; so this KV-VECTOR is the most current one.
   `(defun ,name (key table default
@@ -1987,7 +1892,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
        (when (and (plusp index) (eq (aref kv-vector index) key))
          (return-from ,name (values (aref kv-vector (1+ index)) t))))
      (with-pinned-objects (key)
-       (binding* (,@(ht-hash-setup hash-fun-name adaptivep)
+       (binding* (,@(ht-hash-setup hash-fun-name stateful-hash-p)
                   (eq-test ,(ht-probing-should-use-eq std-fn)))
          (flet ((hash-search (&aux ,@(ht-probe-setup std-fn))
                   (declare (index/2 index))
@@ -2208,12 +2113,12 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                    (values default nil)
                    (values probed-value t)))))
 
-(define-ht-getter gethash/eq-hash/common eq eq-hash/common* t)
+(define-ht-getter gethash/eq-hash/default eq eq-hash/default*)
 (define-ht-getter gethash/eql-hash eql eql-hash)
 (define-ht-getter gethash/equal equal equal-hash)
 (define-ht-getter gethash/equalp equalp equalp-hash)
 (define-ht-getter gethash/any nil nil)
-(define-ht-getter gethash/eq-hash/general eq eq-hash/general*)
+(define-ht-getter gethash/eq-hash/safe eq eq-hash/safe*)
 
 ;;; In lieu of racing to rehash in multiple threads due to GC key movement,
 ;;; or blocking on a mutex to rehash, threads can perform just the FIND
@@ -2320,14 +2225,14 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                 (pick-table-methods-1
                  synchronized gethash/eq-hash/flat puthash/eq-hash/flat
                  remhash/eq-hash/flat hash-fun-state))
-               ((#.+hft-general+)
+               ((#.+hft-safe+)
                 (pick-table-methods-1
-                 synchronized gethash/eq-hash/general puthash/eq-hash/general
-                 remhash/eq-hash/general hash-fun-state))
+                 synchronized gethash/eq-hash/safe puthash/eq-hash/safe
+                 remhash/eq-hash/safe hash-fun-state))
                (t
                 (pick-table-methods-1
-                 synchronized gethash/eq-hash/common puthash/eq-hash/common
-                 remhash/eq-hash/common hash-fun-state))))
+                 synchronized gethash/eq-hash/default puthash/eq-hash/default
+                 remhash/eq-hash/default hash-fun-state))))
             (eql
              (if (eql hash-fun-state +hft-flat+)
                  (pick-table-methods-1
@@ -2386,7 +2291,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
 ;;; because insertion can not co-occur with any other operation,
 ;;; unlike GETHASH which we allow to execute in multiple threads.
 (defmacro define-ht-setter (name std-fn hash-fun-name
-                            &optional adaptivep max-chain-length)
+                            &optional stateful-hash-p max-chain-length)
   `(defun ,name (key table value &aux (hash-table (truly-the hash-table table))
                                       (kv-vector (hash-table-pairs hash-table)))
      (declare (optimize speed (sb-c:verify-arg-count 0)
@@ -2415,7 +2320,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
          ;; Granted that the bit might have been 1 at timestamp 't1',
          ;; but it's best to read it at t1 and not later.
          (binding* ((initial-stamp (kv-vector-rehash-stamp kv-vector))
-                    ,@(ht-hash-setup hash-fun-name adaptivep)
+                    ,@(ht-hash-setup hash-fun-name stateful-hash-p)
                     ,@(ht-probe-setup std-fn)
                     (eq-test ,(ht-probing-should-use-eq std-fn)))
            (declare (index/2 index))
@@ -2525,7 +2430,12 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                    (aref index-vector bucket) index)))
          value))
 
-  (define-ht-setter puthash/eq-hash/common eq eq-hash/common* t 14)
+  (define-ht-setter puthash/eq-hash/default eq eq-hash/default*
+    ;; With N keys being hashed uniformly randomly, the probability of
+    ;; more than 14 keys falling into the same bucket is less than 1%
+    ;; for all hash table bucket counts. Estimated with simple
+    ;; Monte-Carlo.
+    nil 14)
   (define-ht-setter puthash/eql-hash eql eql-hash)
   (define-ht-setter puthash/equal equal equal-hash)
   (define-ht-setter puthash/equalp equalp equalp-hash)
@@ -2549,9 +2459,9 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
   ;; increase the distance in memory between INSERT-AT and the more
   ;; commonly invoked setters. The effect of this on performance is
   ;; measurable on x86-64. -- MG, 2024-02-08
-  (define-ht-setter puthash/eq-hash/general eq eq-hash/general*))
+  (define-ht-setter puthash/eq-hash/safe eq eq-hash/safe*))
 
-(defmacro define-remhash (name std-fn hash-fun-name &optional adaptivep)
+(defmacro define-remhash (name std-fn hash-fun-name &optional stateful-hash-p)
   `(defun ,name (key table &aux (hash-table (truly-the hash-table table))
                                        (kv-vector (hash-table-pairs hash-table)))
      (declare (optimize speed (sb-c:verify-arg-count 0)
@@ -2563,7 +2473,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
        ;; See comment in DEFINE-HT-SETTER about why to read initial-stamp
        ;; as soon as possible after pinning KEY.
        (binding* ((initial-stamp (kv-vector-rehash-stamp kv-vector))
-                  ,@(ht-hash-setup hash-fun-name adaptivep)
+                  ,@(ht-hash-setup hash-fun-name stateful-hash-p)
                   ,@(ht-probe-setup std-fn)
                   (eq-test ,(ht-probing-should-use-eq std-fn)))
          (declare (index/2 index) (ignore probe-limit))
@@ -2685,12 +2595,12 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                (return (clear-slot this hash-table kv-vector next-vector)))
              (check-excessive-probes 1))))
 
-  (define-remhash remhash/eq-hash/common eq eq-hash/common* t)
+  (define-remhash remhash/eq-hash/default eq eq-hash/default*)
   (define-remhash remhash/eql-hash eql eql-hash)
   (define-remhash remhash/equal equal equal-hash)
   (define-remhash remhash/equalp equalp equalp-hash)
   (define-remhash remhash/any nil nil)
-  (define-remhash remhash/eq-hash/general eq eq-hash/general*))
+  (define-remhash remhash/eq-hash/safe eq eq-hash/safe*))
 
 (defun remhash (key hash-table)
   "Remove the entry in HASH-TABLE associated with KEY. Return T if

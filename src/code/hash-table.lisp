@@ -66,7 +66,7 @@
                                 gethash-impl
                                 puthash-impl
                                 remhash-impl
-                                %hash-fun-state
+                                hash-fun-state
                                 test
                                 test-fun
                                 hash-fun
@@ -86,11 +86,7 @@
   ;; for the different HASH-FUNs. Thus, it completely identifies the
   ;; hash function. It may be changed during the lifetime of the hash
   ;; table, which allows us to do adaptive hashing.
-  (%hash-fun-state 0
-   ;; HASH-FUN-STATE easily fits into a fixnum, but this type allows
-   ;; the EQ-HASH/SMALL branch in EQ-HASH/COMMON to avoid an
-   ;; arithmetic shift in assembly.
-   :type (signed-byte #.sb-vm:n-word-bits))
+  (hash-fun-state 0 :type fixnum)
   ;; The Key-Value pair vector.
   ;; Note: this vector has a "high water mark" which resembles a fill
   ;; pointer, but unlike a fill pointer, GC can ignore elements
@@ -190,7 +186,7 @@
                                 gethash-impl
                                 puthash-impl
                                 remhash-impl
-                                %hash-fun-state
+                                hash-fun-state
                                 test
                                 test-fun
                                 hash-fun
@@ -244,6 +240,7 @@
 
 ;;; HASH-TABLE-HASH-FUN-STATEs not specific to a particular hash test
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  (defconstant +hft-default+ -5)
   ;; This is redundant with HASH-TABLE-USERFUN-FLAG, but sometimes
   ;; more convenient to inspect the state. User-defined hash functions
   ;; are never adaptive.
@@ -252,7 +249,7 @@
   (defconstant +hft-non-adaptive+ -3)
   ;; The state denoting a traditional, general-purpose hash function
   ;; that tries to be as "random" as opossible.
-  (defconstant +hft-general+ -2)
+  (defconstant +hft-safe+ -2)
   ;; State for the FLAT-HASH-TABLE-P.
   (defconstant +hft-flat+ -1))
 
