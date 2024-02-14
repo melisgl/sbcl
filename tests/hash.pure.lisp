@@ -526,10 +526,10 @@
 
 (defconstant +flat-limit/eq+ 32)
 (defconstant +flat-limit/eql+ 16)
-(defconstant +hft-flat+ -1)
-(defconstant +hft-safe+ -2)
 (defconstant +hft-non-adaptive+ -3)
-(defconstant +hft-default+ -5)
+(defconstant +hft-safe+ -2)
+(defconstant +hft-flat+ -1)
+(defconstant +hft-eq-mid+ 0)
 
 (with-test (:name :eq-flat-switch)
   (let ((h (make-hash-table :test 'eq)))
@@ -545,11 +545,11 @@
     (setf (gethash (1+ +flat-limit/eq+) h) t)
     (assert (not (sb-impl::flat-hash-table-p h)))
     (assert (eq (sb-impl::hash-table-gethash-impl h)
-                #'sb-impl::gethash/eq-hash/default))
+                #'sb-impl::gethash/eq-hash/common))
     (assert (eq (sb-impl::hash-table-puthash-impl h)
-                #'sb-impl::puthash/eq-hash/default))
+                #'sb-impl::puthash/eq-hash/common))
     (assert (eq (sb-impl::hash-table-remhash-impl h)
-                #'sb-impl::remhash/eq-hash/default))))
+                #'sb-impl::remhash/eq-hash/common))))
 
 (with-test (:name :eql-flat-switch-point)
   (let ((h (make-hash-table)))
@@ -573,13 +573,37 @@
 
 (with-test (:name :eq-hash-growth-from-non-flat-init)
   (let ((h (make-hash-table :size 222 :test 'eq)))
-    (assert (= (sb-impl::hash-table-hash-fun-state h) +hft-default+))
+    (assert (= (sb-impl::hash-table-hash-fun-state h) +hft-eq-mid+))
     (dotimes (i 1000)
       (setf (gethash i h) i))
-    (assert (= (sb-impl::hash-table-hash-fun-state h) +hft-default+))))
+    (assert (= (sb-impl::hash-table-hash-fun-state h) +hft-eq-mid+))))
 
 (with-test (:name :eq-hash-switch-to-safe)
   (let ((h (make-hash-table :test 'eq)))
+    ;; Prevent SB-IMPL::GUESS-EQ-HASH-FUN from finding the shift
+    ;; required to bring the informative bits into range.
+    (setf (gethash t h) t)
     (dotimes (i (1+ +flat-limit/eq+))
       (setf (gethash (float i) h) i))
     (assert (= (sb-impl::hash-table-hash-fun-state h) +hft-safe+))))
+
+(with-test (:name :eq-hash-switch-to-mid)
+  (let ((h (make-hash-table :test 'eq)))
+    (assert (= (sb-impl::hash-table-hash-fun-state h) +hft-flat+))
+    (loop for i below (1+ +flat-limit/eq+)
+          do (setf (gethash (cons nil nil) h) i))
+    (assert (plusp (sb-impl::hash-table-hash-fun-state h)))
+    (loop for i upfrom +flat-limit/eq+ below 8000
+          do (setf (gethash i h) i))
+    (assert (= (sb-impl::hash-table-hash-fun-state h) +hft-eq-mid+))))
+
+(with-test (:name :eq-hash-switch-to-mid/weak)
+  (let ((h (make-hash-table :test 'eq :weakness :value)))
+    (assert (= (sb-impl::hash-table-hash-fun-state h) +hft-eq-mid+))
+    (loop for i below 20
+          do (setf (gethash (cons nil nil) h) i))
+    ;; Weak hash tables are not adaptive, currently.
+    (assert (= (sb-impl::hash-table-hash-fun-state h) +hft-eq-mid+))
+    (loop for i upfrom +flat-limit/eq+ below 8000
+          do (setf (gethash i h) i))
+    (assert (= (sb-impl::hash-table-hash-fun-state h) +hft-eq-mid+))))
