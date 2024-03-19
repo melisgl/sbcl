@@ -26,13 +26,13 @@ then
 fi
 # Build it.
 version_head=`git rev-parse HEAD`
-if grep -q "ref: refs/heads/.*" .git/HEAD > /dev/null 2>&1
-then
-    version_branchname=`cut -d / -f 3- < .git/HEAD`
-else
+# if grep -q "ref: refs/heads/.*" .git/HEAD > /dev/null 2>&1
+# then
+#     version_branchname=`cut -d / -f 3- < .git/HEAD`
+# else
     # Detached head.
     version_branchname="HEAD"
-fi
+# fi
 if [ -z "$SBCL_BUILDING_RELEASE_FROM" ]
 then
     version_root=`git merge-base HEAD origin/master`
@@ -52,12 +52,12 @@ then
 else
     version_hash=""
 fi
-if git diff HEAD --no-ext-diff --quiet --exit-code
-then
-    version_dirty=""
-else
-    version_dirty="-WIP"
-fi
+# if git diff HEAD --no-ext-diff --quiet --exit-code
+# then
+#     version_dirty=""
+# else
+#     version_dirty="-WIP"
+# fi
 # Now that we have all the pieces, put them together.
 cat >version.lisp-expr <<EOF
 ;;; This file is auto-generated using generate-version.sh. Every time
