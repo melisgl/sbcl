@@ -26,6 +26,9 @@
 ;;;;  - place the 3 or 4 vectors in a separate structure that can be atomically
 ;;;;    swapped out for a new instance with new vectors. Remove array bounds
 ;;;;    checking since all the arrays will be tied together.
+;;;;  - As a consequence of change 3bdd4d28ed, the compiler started to
+;;;;    emit multiple definitions of certain INLINE global functions.
+;;;;    Just referencing #'INLINED-FOO can cause genesis failures.
 
 ;;; T if and only if table has non-null weakness kind.
 (declaim (inline hash-table-weak-p))
@@ -55,12 +58,19 @@
   (and (hash-table-weak-p ht)
        (decode-hash-table-weakness (ht-flags-weakness (hash-table-flags ht)))))
 
+;;; On 32-bit machines, the hashes are positive fixnums, but on
+;;; 64-bit, we use 2 more bits though must avoid conflict with
+;;; +MAGIC-HASH-VECTOR-VALUE+, which denotes an address-based hash in
+;;; HASH-TABLE-HASH-VECTOR.
+(deftype clipped-hash () '(unsigned-byte #.+max-hash-table-bits+))
+
 (declaim (inline clip-hash))
 (defun clip-hash (hash)
-  ;; On 32-bit machines, the hashes are positive fixnums, but on
-  ;; 64-bit, we use 2 more bits though must avoid conflict with
-  ;; +MAGIC-HASH-VECTOR-VALUE+, which denotes an address-based hash.
   (ldb (byte #.+max-hash-table-bits+ 0) hash))
+
+(declaim (inline mask-hash))
+(defun mask-hash (hash mask)
+  (truly-the index (logand mask hash)))
 
 ;;; We're using power of two tables which obviously are very sensitive
 ;;; to the entropy in the low bits in the hash value. We used to
@@ -77,51 +87,57 @@
                 (ash hash -20))))
 
 
-;;; Define two inline functions. NAME* returns a single value (the
-;;; hash) of its argument (the key). NAME is like NAME* but also calls
-;;; CLIP-HASH and returns an ADDRESS-BASED-P flag. By convention,
-;;; NAME* is NAME plus #\*.
-(defmacro define-eq-hash ((name* name) (hash) &body body)
+;;; EQ hash functions
+
+;;; Define an inline function called NAME, which takes a single KEY
+;;; argument and returns 1. its CLIPPED-HASH and 2. whether the hash
+;;; is address-based. This requires a call to CLIP-HASH, which may be
+;;; unnecessary if the hash is then masked (e.g. to (1- N-BUCKETS))
+;;; anyway.
+;;;
+;;; For this reason, another function called NAME* is defined, which
+;;; does not clip the hash and may even return a bignum.
+(defmacro define-eq-hash ((name name*) (address) &body body)
   (with-unique-names (key)
     `(progn
-       (declaim (inline ,name*))
-       (defun ,name* (,key)
+       (declaim (ftype (sfunction (t) (values clipped-hash boolean)) ,name))
+       (declaim (inline ,name))
+       (defun ,name (,key)
+         (declare (optimize (sb-c:verify-arg-count 0)))
+         ;; It would be ok to pick off SYMBOL here and use its hash
+         ;; slot as far as semantics are concerned, but EQ-hash is
+         ;; supposed to be the lightest-weight in terms of speed, so
+         ;; I'm letting everything use address-based hashing, unlike
+         ;; the other standard hash-table hash functions which try use
+         ;; the hash slot of certain objects. Note also that as we add
+         ;; logic into the EQ-HASH function to decide whether the hash
+         ;; is address-based, we either have to replicate that logic
+         ;; into rehashing, or else actually call EQ-HASH to decide
+         ;; for us. -- DK, 2019-06-22
+         ;;
          ;; Use GET-LISP-OBJ-ADDRESS instead of POINTER-HASH so that
          ;; BODY can work with an unboxed word and perhaps be a bit
          ;; faster as a result. Also, we get a bit tighter code with a
          ;; symbol macrolet compared to binding HASH to
          ;; (GET-LISP-OBJ-ADDRESS KEY).
-         (symbol-macrolet ((,hash (get-lisp-obj-address ,key)))
-           (ldb (byte #.sb-vm:n-word-bits 0) (progn ,@body))))
-       ;; Hash table hash functions are permitted to return any
-       ;; FIXNUM. This is less restrictive than SXHASH which says it
-       ;; has to be positive.
-       (declaim (ftype (sfunction (t) (values fixnum boolean)) ,name))
-       (declaim (inline ,name))
-       (defun ,name (,key)
-         (declare (values fixnum (member t nil)))
-         ;; I think it would be ok to pick off SYMBOL here and use its
-         ;; hash slot as far as semantics are concerned, but EQ-hash
-         ;; is supposed to be the lightest-weight in terms of speed,
-         ;; so I'm letting everything use address-based hashing,
-         ;; unlike the other standard hash-table hash functions which
-         ;; try use the hash slot of certain objects. Note also that
-         ;; as we add logic into the EQ-HASH function to decide
-         ;; whether the hash is address-based, we either have to
-         ;; replicate that logic into rehashing, or else actually call
-         ;; EQ-HASH to decide for us. -- DK, 2019-06-22
-         (values (clip-hash (,name* ,key))
-                 (sb-vm:is-lisp-pointer (get-lisp-obj-address ,key)))))))
+         (symbol-macrolet ((,address (get-lisp-obj-address ,key)))
+           (values (clip-hash (ldb (byte #.sb-vm:n-word-bits 0) (progn ,@body)))
+                   (sb-vm:is-lisp-pointer (get-lisp-obj-address ,key)))))
+       (declaim (inline ,name*))
+       (defun ,name* (,key)
+         (symbol-macrolet ((,address (get-lisp-obj-address ,key)))
+           (values (ldb (byte #.sb-vm:n-word-bits 0) (progn ,@body))
+                   (sb-vm:is-lisp-pointer (get-lisp-obj-address ,key))))))))
 
 ;;; This is equivalent to the old way of calling PREFUZZ-HASH on
 ;;; POINTER-HASH because HASH from GET-LISP-OBJ-ADDRESS is shifted
 ;;; here an extra SB-VM:N-FIXNUM-TAG-BITS.
-(define-eq-hash (eq-hash* eq-hash) (hash)
+(define-eq-hash (eq-hash eq-hash*) (address)
   (+ (logxor #b11100101010001011010100111
-             (ash hash #.(- sb-vm:n-fixnum-tag-bits)))
-     (ash hash #.(- (+ 3 sb-vm:n-fixnum-tag-bits)))
-     (ash hash #.(- (+ 12 sb-vm:n-fixnum-tag-bits)))
-     (ash hash #.(- (+ 20 sb-vm:n-fixnum-tag-bits)))))
+             (ash address #.(- sb-vm:n-fixnum-tag-bits)))
+     (ash address #.(- (+ 3 sb-vm:n-fixnum-tag-bits)))
+     (ash address #.(- (+ 12 sb-vm:n-fixnum-tag-bits)))
+     (ash address #.(- (+ 20 sb-vm:n-fixnum-tag-bits)))))
 
 
 (declaim (ftype (sfunction (t) (values fixnum boolean))
@@ -196,7 +212,7 @@
   (declare (values fixnum boolean))
   ;; Ultimately we just need to choose between SXHASH or EQ-HASH. As to using
   ;; INSTANCE-SXHASH, it doesn't matter, and in fact it's quicker to use EQ-HASH.
-  ;; If the outermost object passed as a key is LIST, then it descends using SXASH,
+  ;; If the outermost object passed as a key is LIST, then it descends using SXHASH,
   ;; you will in fact get stable hashes for nested objects.
   (if (case (lowtag-of key)
         (#.sb-vm:list-pointer-lowtag t)
@@ -223,10 +239,6 @@
     (instance (values (clip-hash (instance-sxhash key)) nil))
     (t
      (eq-hash key))))
-
-(declaim (inline mask-hash))
-(defun mask-hash (hash mask)
-  (truly-the index (logand mask hash)))
 
 ;;;; user-defined hash table tests
 
@@ -644,8 +656,7 @@ Examples:
                         #.default-rehash-size
                         $1.0)))) ; rehash threshold
 
-;;; I guess we might have more than one representation of a table,
-;;; hence this small wrapper function. But why not for the others?
+;;; We don't expose HASH-TABLE-%COUNT directly because it is SETFable.
 (defun hash-table-count (hash-table)
   "Return the number of entries in the given HASH-TABLE."
   (declare (type hash-table hash-table)
@@ -662,7 +673,8 @@ Examples:
       "Returns T if HASH-TABLE is synchronized.")
 
 (declaim (inline hash-table-pairs-capacity))
-(defun hash-table-pairs-capacity (pairs) (ash (- (length pairs) kv-pairs-overhead-slots) -1))
+(defun hash-table-pairs-capacity (pairs)
+  (ash (- (length pairs) kv-pairs-overhead-slots) -1))
 
 (defun hash-table-size (hash-table)
   "Return a size that can be used with MAKE-HASH-TABLE to create a hash
@@ -929,9 +941,7 @@ multiple threads accessing the same hash-table without locking."
 (defun recompute-ht-vector-sizes (table)
   (declare (optimize (sb-c:insert-array-bounds-checks 0)))
   (let* ((table (truly-the hash-table table))
-         ;; NEXT-VECTOR's length is 1 greater than "size" which is the
-         ;; number of k/v pairs stored at its full capacity.
-         (old-size (1- (length (hash-table-next-vector table))))
+         (old-size (hash-table-pairs-capacity (hash-table-pairs table)))
          (rehash-size (hash-table-rehash-size table)))
     (if (and (floatp rehash-size)
              (= rehash-size default-rehash-size)
@@ -1398,7 +1408,11 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
              (sb-thread:barrier (:read)) ; barrier 1
              (if (logtest initial-stamp kv-vector-rehashing)
                  (truly-the (values t boolean &optional)
-                            (hash-table-lsearch hash-table eq-test key hash default))
+                            (hash-table-lsearch hash-table eq-test key
+                                                ,(if (eq std-fn 'eq)
+                                                     '(clip-hash hash)
+                                                     'hash)
+                                                default))
                  (let ((index (hash-search)))
                    (if (not (eql index 0))
                        (let ((key-index (* 2 (truly-the index/2 index))))
@@ -1451,7 +1465,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
 ;;; versus the cell being in the freelist. So the code diverges in at least that way.
 (defun findhash-weak (key hash-table hash address-based-p)
   (declare (hash-table hash-table) (optimize speed)
-           (type (unsigned-byte #.+max-hash-table-bits+) hash))
+           (type clipped-hash hash))
   (let* ((kv-vector (hash-table-pairs hash-table))
          (initial-stamp (kv-vector-rehash-stamp kv-vector)))
     (flet ((hash-search ()
@@ -1576,7 +1590,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                    (values default nil)
                    (values probed-value t)))))
 
-(define-ht-getter gethash/eq eq eq-hash)
+(define-ht-getter gethash/eq eq eq-hash*)
 (define-ht-getter gethash/eql eql eql-hash)
 (define-ht-getter gethash/equal equal equal-hash)
 (define-ht-getter gethash/equalp equalp equalp-hash)
@@ -1787,12 +1801,19 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                      ((not (fixnump key-index)) (signal-corrupt-hash-table hash-table))
                      (t (return-from done (setf (aref kv-vector (1+ key-index)) value))))))
            ;; Pop a KV slot off the free list
-           (insert-at (truly-the index/2 (hash-table-next-free-kv hash-table))
-                      hash-table key hash address-based-p value))))))
+           (insert-at (truly-the (and index/2 (unsigned-byte 32))
+                                 (hash-table-next-free-kv hash-table))
+                      hash-table key
+                      ;; Clip the unclipped hash from EQ-HASH* or its
+                      ;; kind to be able to pass it to INSERT-AT
+                      ;; without consing.
+                      ,(if (eq std-fn 'eq) '(clip-hash hash) 'hash)
+                      address-based-p value))))))
 
 (flet ((insert-at (index hash-table key hash address-based-p value)
          (declare (optimize speed (sb-c:insert-array-bounds-checks 0))
-                  (type (unsigned-byte #.+max-hash-table-bits+) hash))
+                  (type (and index/2 (unsigned-byte 32)) index)
+                  (type clipped-hash hash))
          (when (zerop index)
            (setq index (grow-hash-table hash-table))
            ;; Growing the table can not make the key become found when it was not
@@ -1866,7 +1887,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                  (neq (weak-kvv-ref kv-vector physical-index) probed-key))
              (signal-corrupt-hash-table hash-table))
             (t value))))
-  (define-ht-setter puthash/eq eq eq-hash)
+  (define-ht-setter puthash/eq eq eq-hash*)
   (define-ht-setter puthash/eql eql eql-hash)
   (define-ht-setter puthash/equal equal equal-hash)
   (define-ht-setter puthash/equalp equalp equalp-hash)
@@ -2006,7 +2027,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                (return (clear-slot this hash-table kv-vector next-vector)))
              (check-excessive-probes 1))))
 
-  (define-remhash remhash/eq eq eq-hash)
+  (define-remhash remhash/eq eq eq-hash*)
   (define-remhash remhash/eql eql eql-hash)
   (define-remhash remhash/equal equal equal-hash)
   (define-remhash remhash/equalp equalp equalp-hash)
