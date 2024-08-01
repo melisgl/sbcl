@@ -2550,7 +2550,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
   ;; CALL-WITH-...LOCK into these methods.
   (values
    (if hash-fun-state
-       (lambda (key table default)
+       (named-lambda gethash/lock (key table default)
          (declare (optimize speed (sb-c:verify-arg-count 0)))
          (truly-the
           (values t t &optional)
@@ -2565,7 +2565,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                            getter
                            (hash-table-gethash-impl table))
                        key table default)))))
-       (lambda (key table default)
+       (named-lambda gethash/lock (key table default)
          (declare (optimize speed (sb-c:verify-arg-count 0)))
          (truly-the
           (values t t &optional)
@@ -2573,7 +2573,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
             (sb-thread::with-recursive-system-lock ((hash-table-%lock table))
               (funcall getter key table default))))))
    (if hash-fun-state
-       (lambda (key table value)
+       (named-lambda puthash/lock (key table value)
          (declare (optimize speed (sb-c:verify-arg-count 0)))
          (truly-the
           (values t &optional)
@@ -2584,7 +2584,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                            setter
                            (hash-table-puthash-impl table))
                        key table value)))))
-       (lambda (key table value)
+       (named-lambda puthash/lock (key table value)
          (declare (optimize speed (sb-c:verify-arg-count 0)))
          (truly-the
           (values t &optional)
@@ -2592,7 +2592,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
             (sb-thread::with-recursive-system-lock ((hash-table-%lock table))
               (funcall setter key table value))))))
    (if hash-fun-state
-       (lambda (key table)
+       (named-lambda remhash/lock (key table)
          (declare (optimize speed (sb-c:verify-arg-count 0)))
          (truly-the
           (values t &optional)
@@ -2603,7 +2603,7 @@ nnnn 1_    any       linear scan (don't try to read when rehash already in progr
                            remover
                            (hash-table-remhash-impl table))
                        key table)))))
-       (lambda (key table)
+       (named-lambda remhash/lock (key table)
          (declare (optimize speed (sb-c:verify-arg-count 0)))
          (truly-the
           (values t &optional)
