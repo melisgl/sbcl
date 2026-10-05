@@ -878,13 +878,18 @@
 
 (defsection @interpreter (:title "Interpreter"
                           :concepts ("interpreter"))
-  "By default SBCL implements EVAL by calling the native code
-  compiler.
+  "By default, SBCL implements EVAL by calling the native-code
+  compiler. There are two, mutually exclusive interpreter
+  implementations: sb-eval (the default) and sb-fasteval. These are
+  intended for when using the compiler is undesirable, for example due
+  to compilation overhead.
 
-  SBCL also includes an interpreter for use in special cases where
-  using the compiler is undesirable, for example due to compilation
-  overhead. Unlike in some other Lisp implementations, in SBCL
-  interpreted code is not safer or more debuggable than compiled code."
+  An interpreterless SBCL can be compiled by passing
+  `--without-sb-eval` to `make.sh`, while sb-fasteval can be enabled
+  with `--without-sb-eval --with-sb-fasteval.`
+
+  Unlike in some other Lisp implementations, in SBCL interpreted code
+  is not safer or more debuggable than compiled code."
   (sb-ext:*evaluator-mode* variable))
 
 (defsection @advanced-compiler-use-and-efficiency-hints

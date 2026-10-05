@@ -981,20 +981,27 @@ efficient calling convention that forbids redefinition.
 @cindex interpreter
 @section Interpreter
 
-By default SBCL implements @code{eval} by calling the native code
-compiler.
+By default, SBCL implements @code{eval} by calling the native-code
+compiler. There are two, mutually exclusive interpreter
+implementations: sb-eval (the default) and sb-fasteval. These are
+intended for when using the compiler is undesirable, for example due
+to compilation overhead.
 
-SBCL also includes an interpreter for use in special cases where
-using the compiler is undesirable, for example due to compilation
-overhead. Unlike in some other Lisp implementations, in SBCL
-interpreted code is not safer or more debuggable than compiled code.
+An interpreterless SBCL can be compiled by passing
+@code{--without-sb-eval} to @code{make.sh}, while sb-fasteval can be enabled
+with @code{--without-sb-eval --with-sb-fasteval.}
+
+Unlike in some other Lisp implementations, in SBCL interpreted code
+is not safer or more debuggable than compiled code.
 
 @anchor{Variable sb-ext *evaluator-mode*}
 @vvindex @sortas{evaluator-mode* sb-ext} *evaluator-mode* [sb-ext]
 @deffn{Variable} sb-ext:*evaluator-mode*
 Toggle between different evaluator implementations. If set to @code{:compile},
 an implementation of @code{eval} that calls the compiler will be used. If set
-to @code{:interpret}, an interpreter will be used.
+to @code{:interpret}, an interpreter will be used. @code{:interpret} is a valid
+value only if SBCL has been compiled with either the @code{sb-eval} or the
+@code{sb-fasteval} feature.
 @end deffn
 @node advanced compiler use and efficiency hints
 @section Advanced Compiler Use and Efficiency Hints

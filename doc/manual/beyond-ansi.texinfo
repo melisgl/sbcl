@@ -1874,13 +1874,9 @@ Returns the sentence breaking class of @code{character}, as specified in UAX #29
 @end deffn
 @anchor{Function sb-unicode line-break-class}
 @ffindex @sortas{line-break-class sb-unicode} line-break-class [sb-unicode]
-@deffn{Function} sb-unicode:line-break-class character &key resolve
-Returns the line breaking class of @code{character}, as specified in UAX #14.
-If @code{:resolve} is @code{nil}, returns the character class found in the property file.
-If @code{:resolve} is non-@code{nil}, certain line-breaking classes will be mapped to other
-classes as specified in the applicable standards. Additionally, if @code{:resolve}
-is @code{:east-asian}, Ambigious (class @code{:ai}) characters will be mapped to the
-Ideographic (@code{:id}) class instead of Alphabetic (@code{:al}).
+@deffn{Function} sb-unicode:line-break-class character
+Returns the line breaking class of @code{character}, as specified in the
+Unicode character database.
 @end deffn
 @node string operations
 @cindex normalization of strings
