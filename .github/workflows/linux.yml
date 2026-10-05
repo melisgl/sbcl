@@ -15,6 +15,7 @@ jobs:
         options: [--with-sb-thread, --without-sb-thread]
         arch: [x86, x86-64]
         subfeatures: ['']
+        # Use config-name to control the filename of the binary if needed.
         include:
           - { arch: x86-64, subfeatures: sse4, options: --with-sb-thread --with-nonstop-foreign-call --with-tls-based-mv-return }
           - { arch: x86-64, subfeatures: fasteval, options: --with-sb-fasteval --without-sb-eval --with-nonstop-foreign-call }
@@ -98,27 +99,29 @@ jobs:
     #   if: matrix.subfeatures == 'sse4'
     #   run: ./build-all-cores.sh -j 1 x86-64
 
+    # This configuration built and passed the tests. If all other
+    # configurations pass, we will need this binary.
     - name: package binary
       # !!! if: github.ref == 'refs/heads/master'
       run: |
-        FEATURES_NAME="${{ matrix.features-name }}"
-        if [ -z "$FEATURES_NAME" ]; then
-            FEATURES_NAME="${{ matrix.options }}"
+        CONFIG_NAME="${{ matrix.config-name }}"
+        if [ -z "$CONFIG_NAME" ]; then
+            CONFIG_NAME="${{ matrix.options }}"
             if [ ! -z "${{ matrix.subfeatures }}" ]; then
-                FEATURES_NAME="$FEATURES_NAME_${{ matrix.subfeatures}}"
+                CONFIG_NAME="$CONFIG_NAME_${{ matrix.subfeatures}}"
             fi
-            FEATURES_NAME="$(echo "$FEATURES_NAME" | sed 's/[^a-zA-Z0-9]/-/g')"
+            CONFIG_NAME="$(echo "$CONFIG_NAME" | sed 's/[^a-zA-Z0-9]/-/g')"
         fi
-        FILENAME="sbcl_${{ runner.os }}_${{ matrix.arch }}_${FEATURES_NAME}_latest-dev_bin.tar"
+        FILENAME="sbcl_${{ runner.os }}_${{ matrix.arch }}_${CONFIG_NAME}_github-latest-dev_bin.tar"
         # Downcase it
         FILENAME="${FILENAME,,}"
         cd ..
-        mv sbcl sbcl-latest-dev
-        sbcl-latest-dev/binary-distribution.sh sbcl-latest-dev
-        mv sbcl-latest-dev sbcl
-        mv sbcl-latest-dev-binary.tar "$FILENAME"
-        # Store this name for the next step (upload/release)
-        echo "BINARY_PATH=../$FILENAME" >> $GITHUB_ENV
+        mv sbcl sbcl-github-latest-dev
+        sbcl-github-latest-dev/binary-distribution.sh sbcl-github-latest-dev
+        mv sbcl-github-latest-dev sbcl
+        mv sbcl-github-latest-dev-binary.tar "$FILENAME"
+        ABS_PATH=$(readlink -f "$FILENAME")
+        echo "BINARY_PATH=$ABS_PATH" >> $GITHUB_ENV
         echo "FILENAME=$FILENAME" >> $GITHUB_ENV
 
     - name: upload temporary artifact
@@ -140,7 +143,7 @@ jobs:
         path: binaries/
         merge-multiple: true
 
-    - name: update latest-dev release
+    - name: update github-latest-dev release
       # !!! if: github.ref == 'refs/heads/master'
       uses: softprops/action-gh-release@v2
       # Prevents a failing upload from failing the whole build
