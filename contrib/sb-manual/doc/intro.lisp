@@ -202,9 +202,9 @@
 
   SBCL instead treats the undefined behavior as an error. Often such
   code can be rewritten in portable ANSI Common Lisp which has the
-  desired behavior. E.g., the code above can be given an exactly
-  defined meaning by replacing DEFCONSTANT either with DEFPARAMETER or
-  with a customized macro which does the right thing, e.g.
+  desired behavior. The code above can be given an exactly defined
+  meaning by replacing DEFCONSTANT either with DEFPARAMETER or with a
+  customized macro which does the right thing, e.g.
 
       (defmacro define-constant (name value &optional doc)
         `(defconstant ,name (if (boundp ',name) (symbol-value ',name) ,value)
