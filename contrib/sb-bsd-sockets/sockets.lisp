@@ -284,10 +284,10 @@ the recursive event loop. Default is false.
 
 The stream for SOCKET will be cached, and a second invocation of this
 method will return the same stream. This may lead to oddities if this
-function is invoked with inconsistent arguments \(e.g., one might
+function is invoked with inconsistent arguments \(e.g. one might
 request an input stream and get an output stream in response\)."
   (let ((stream
-         (and (slot-boundp socket 'stream) (slot-value socket 'stream))))
+          (and (slot-boundp socket 'stream) (slot-value socket 'stream))))
     (unless stream
       (setf stream (sb-sys:make-fd-stream
                     (socket-file-descriptor socket)

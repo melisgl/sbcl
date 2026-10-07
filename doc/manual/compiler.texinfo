@@ -13,13 +13,11 @@
 * Advanced Compiler Use and Efficiency Hints: advanced compiler use and efficiency hints.
 @end menu
 
-This chapter will discuss most compiler issues other than efficiency,
-including compiler error messages, the SBCL compiler's unusual
-approach to type safety in the presence of type declarations, the
-effects of various compiler optimization policies, and the way that
-inlining and open coding may cause optimized code to differ from a
-naive translation. Efficiency issues are sufficiently varied and
-separate that they have their own chapter, @ref{efficiency}.
+This chapter will discuss most compiler issues other than @ref{efficiency},
+including compiler messages, type safety in the presence of type
+declarations, the effects of various optimization policies, and the
+way that inlining and open coding may cause optimized code to differ
+from a naive translation.
 
 @node diagnostic messages
 @cindex compiler messsage
@@ -37,13 +35,13 @@ separate that they have their own chapter, @ref{efficiency}.
 @cindex verbosity of compiler messsages
 @subsection Controlling Verbosity
 
-The compiler can be quite verbose in its diagnostic reporting, rather
-more then some users would prefer -- the amount of noise emitted can
-be controlled, however.
+The compiler can be quite verbose in its diagnostic reporting – rather
+more than some users would prefer. However, the amount of noise
+emitted can be controlled.
 
-To control emission of compiler diagnostics (of any severity other
-than @code{error}: @ref{diagnostic severity}) use the @code{sb-ext:muffle-conditions}
-and @code{sb-ext:unmuffle-conditions} declarations, specifying the type of
+To control emission of compiler diagnostics (except those with
+@ref{diagnostic severity} error) use the @code{sb-ext:muffle-conditions} and
+@code{sb-ext:unmuffle-conditions} declarations, specifying the type of
 condition that is to be muffled (the muffling is done using an
 associated @code{muffle-warning} restart).
 
@@ -352,7 +350,7 @@ gives this error message
 @end example
 
 This message is not saying that there is a problem somewhere in this
-@code{let} -- it is saying that there is a problem with the @code{let} itself. In
+@code{let} – it is saying that there is a problem with the @code{let} itself. In
 this example, the problem is that @code{a}'s @code{nil} initial value is not a
 @code{fixnum}.
 

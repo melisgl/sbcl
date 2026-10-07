@@ -1,11 +1,19 @@
 (in-package :sb-manual)
 
+(defun lookup-method-xref (xref)
+  (let ((gf (ignore-errors (fdefinition (xref-name xref)))))
+    (when (typep gf 'generic-function)
+      (find-method gf (butlast (xref-locative-args xref))
+                   (first (last (xref-locative-args xref)))))))
+
 (defun xref-defined-p (xref)
   (let ((name (xref-name xref))
         (locative-type (xref-locative-type xref)))
     (case locative-type
       ((function generic-function)
        (ignore-errors (fdefinition name)))
+      ((method)
+       (lookup-method-xref xref))
       ((variable)
        (member (sb-int:info :variable :kind name)
                '(:global :special :constant)))
@@ -27,12 +35,51 @@
 
 ;;; We don't DEFINE-DUMMY DREF:ARGLIST and DREF:DOCSTRING because we
 ;;; don't want USE-PAX to affect Texinfo output, which it would
-;;; because DREF:ARGLIST differs from the {incom,re}prehensible
-;;; LAMBDA-LIST*.
+;;; because DREF:ARGLIST differs from the {incom,re}prehensible CLEAN
+;;; below.
 (defun %arglist (xref)
-  (let ((name (xref-name xref))
-        (locative-type (xref-locative-type xref)))
-    (lambda-list* name locative-type)))
+  (labels
+      ;; KLUDGE: Eugh.
+      ;;
+      ;; Believe it or not, the above comment was written before CSR
+      ;; came along and obfuscated this.  (2005-07-04)
+      ((clean (x &key optional key)
+         (typecase x
+           (atom x)
+           ((cons (member &optional))
+            (cons (car x) (clean (cdr x) :optional t)))
+           ((cons (member &key))
+            (cons (car x) (clean (cdr x) :key t)))
+           ((cons (member &whole &environment))
+            ;; Skip these
+            (clean (cdr x) :optional optional :key key))
+           ((cons cons)
+            (cons
+             (cond (key (if (consp (caar x))
+                            (caaar x)
+                            (caar x)))
+                   (optional (caar x))
+                   (t (clean (car x))))
+             (clean (cdr x) :key key :optional optional)))
+           (cons
+            (cons
+             (cond ((or key optional) (car x))
+                   (t (clean (car x))))
+             (clean (cdr x) :key key :optional optional))))))
+    (case (xref-locative-type xref)
+      ((package constant variable type structure class condition declaration
+                nil)
+       nil)
+      (method
+       (clean (sb-mop:method-lambda-list (lookup-method-xref xref))))
+      (t
+       (let ((name (xref-name xref)))
+         (when (symbolp name)
+           (multiple-value-bind (ll unknown)
+               (sb-introspect:function-lambda-list name)
+             (if unknown
+                 (values nil t)
+                 (clean ll)))))))))
 
 (defun %docstring (xref)
   (let ((sb-pcl::*normalize-sbcl-docstrings* nil))
@@ -43,6 +90,8 @@
                  (documentation name locative-type))
                 ((generic-function)
                  (documentation name 'function))
+                ((method)
+                 (documentation (lookup-method-xref xref) t))
                 ((type class structure condition)
                  (documentation name 'type))
                 (t
@@ -58,46 +107,6 @@
             ;; To be compatible with PAX::@PACKAGE-AND-READTABLE, we
             ;; always return a non-NIL package.
             (docstring-package xref))))
-
-(defun lambda-list* (name kind)
-  (case kind
-    ((package constant variable type structure class condition method
-              declaration nil)
-     nil)
-    (t
-     ;; KLUDGE: Eugh.
-     ;;
-     ;; believe it or not, the above comment was written before CSR
-     ;; came along and obfuscated this.  (2005-07-04)
-     (when (symbolp name)
-       (labels ((clean (x &key optional key)
-                  (typecase x
-                    (atom x)
-                    ((cons (member &optional))
-                     (cons (car x) (clean (cdr x) :optional t)))
-                    ((cons (member &key))
-                     (cons (car x) (clean (cdr x) :key t)))
-                    ((cons (member &whole &environment))
-                     ;; Skip these
-                     (clean (cdr x) :optional optional :key key))
-                    ((cons cons)
-                     (cons
-                      (cond (key (if (consp (caar x))
-                                     (caaar x)
-                                     (caar x)))
-                            (optional (caar x))
-                            (t (clean (car x))))
-                      (clean (cdr x) :key key :optional optional)))
-                    (cons
-                     (cons
-                      (cond ((or key optional) (car x))
-                            (t (clean (car x))))
-                      (clean (cdr x) :key key :optional optional))))))
-         (multiple-value-bind (ll unknown)
-             (sb-introspect:function-lambda-list name)
-           (if unknown
-               (values nil t)
-               (clean ll))))))))
 
 
 (defun locative-type-to-texinfo (locative-type)
@@ -106,6 +115,8 @@
      (values "Function" "ffindex"))
     (generic-function
      (values "Generic function" "ffindex"))
+    (method
+     (values "Method" "ffindex"))
     (variable
      (values "Variable" "vvindex"))
     (class
