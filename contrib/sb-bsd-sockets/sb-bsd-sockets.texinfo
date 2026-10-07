@@ -153,7 +153,7 @@ or both (it is an error to specify neither).
 @end deffn
 @anchor{Method sb-bsd-sockets socket-make-stream}
 @ffindex @sortas{socket-make-stream sb-bsd-sockets} socket-make-stream [sb-bsd-sockets]
-@deffn{Method} sb-bsd-sockets:socket-make-stream socket &key input output element-type buffering external-format timeout auto-close serve-events
+@deffn{Method} sb-bsd-sockets:socket-make-stream socket &key input output (element-type 'character) (buffering :full) (external-format :default) timeout auto-close serve-events
 Default method for @code{socket} objects.
 
 @code{element-type} defaults to @code{character}, to construct a bivalent stream,
@@ -182,7 +182,7 @@ request an input stream and get an output stream in response).
 @end deffn
 @anchor{Function sb-bsd-sockets socket-error}
 @ffindex @sortas{socket-error sb-bsd-sockets} socket-error [sb-bsd-sockets]
-@deffn{Function} sb-bsd-sockets:socket-error where &optional errno
+@deffn{Function} sb-bsd-sockets:socket-error where &optional (errno (sb-bsd-sockets::socket-errno))
 Signal an appropriate error for syscall @code{where} and @code{errno}.
 
 @code{where} should be a string naming the failed function.
