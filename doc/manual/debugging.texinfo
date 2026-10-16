@@ -668,7 +668,7 @@ list whose first element is @code{#:***here***}. In the previous example,
 @subsubsection How the Source is Found
 
 If the code was defined from Lisp by @code{compile} or @code{eval}, then the source
-can always be reliably located. If the code was defined from a FASL
+can always be reliably located. If the code was defined from a fasl
 file created by @code{compile-file}, then the debugger gets the source
 forms it prints by reading them from the original source file. This
 is a potential problem, since the source file might have moved or
@@ -1116,7 +1116,8 @@ exhaustion. Failed assertions in the low-level runtime (see
 @ref{command line options}) trigger entering LDB if it's
 
 @itemize
-@item available (if SBCL was not compiled with @code{--without-sb-ldb}) and
+@item available (if SBCL was not compiled with @code{--without-sb-ldb}; see
+  @ref{customizing the build}) and
 
 @item not disabled (see @code{--disable-ldb} in @ref{runtime options} and
   @code{sb-ext:disable-debugger}).
@@ -1128,8 +1129,7 @@ exits with a non-zero exit code.
 The commands supported can be explored at the LDB prompt by typing
 @code{help} followed by an enter.
 
-Also see the related @code{--lose-on-corruption} option in
-@ref{runtime options}.
+See the related @code{--lose-on-corruption} option in @ref{runtime options}.
 
 @node enabling and disabling the debugger
 @cindex debugger, enabling
