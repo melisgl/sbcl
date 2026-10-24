@@ -38,6 +38,24 @@
                    fun old)))
       name)))
 
+;;; When EVALuating a DEFUN with SB-EXT:*EVALUATOR-MODE* :COMPILE, it
+;;; can be nice to see the compiler notes since the global function
+;;; definition will obviously escape the scope of EVAL. In general
+;;; though, what escapes EVAL and what the performance critical
+;;; instances among those are is impossible to decide. On the
+;;; flipside, sometimes even warnings and style warnings are clutter.
+;;; Hence, this knob. -- MG 2026-10-24
+(defvar sb-ext:*muffled-evaluator-conditions*
+  'compiler-note
+  "WARNINGS, STYLE-WARNINGS and COMPILER-NOTEs signalled by EVAL that
+  match this type are muffled. Conditions signalled by the code being
+  evaluated are not affected. Note that currently such conditions are
+  signalled only when SB-EXT:*EVALUATOR-MODE* is :COMPILE.")
+
+(defun maybe-muffle-for-eval (condition for-eval)
+  (when (and for-eval (typep condition sb-ext:*muffled-evaluator-conditions*))
+    (muffle-warning condition)))
+
 #+sb-devel
 (defvar *debug-trace-toplevel-components* t)
 
@@ -83,16 +101,10 @@
               (let* ((*last-error-context* nil)
                      (*last-message-count* (list* 0 nil nil)))
                 (handler-bind ((compiler-error #'compiler-error-handler)
+                               (t (lambda (c)
+                                    (maybe-muffle-for-eval c for-eval)))
                                (style-warning #'compiler-style-warning-handler)
-                               (warning #'compiler-warning-handler)
-                               (compiler-note
-                                 ;; Compiler notes just clutter up the
-                                 ;; REPL: anyone caring about
-                                 ;; performance should not be using
-                                 ;; EVAL.
-                                 (lambda (c)
-                                   (when for-eval
-                                     (muffle-warning c)))))
+                               (warning #'compiler-warning-handler))
                   (with-source-paths
                     (let* ((tlf (or tlf 0))
                            ;; If we have a source-info from LOAD, we will

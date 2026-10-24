@@ -153,3 +153,28 @@
 
 (with-test (:name (slot-value defmethod t))
   (assert (= (a-class-x-3 (make-instance 'a-class)) 123)))
+
+(with-test (:name :muffled-compiler-conditions-for-eval-1)
+  (let ((sb-ext:*evaluator-mode* :compile)
+        (sb-ext:*muffled-evaluator-conditions* 'sb-ext:compiler-note))
+    (assert (not (search "note:"
+                         (with-output-to-string (*error-output*)
+                           (eval '(lambda (x)
+                                   (declare (optimize speed))
+                                   (1+ x)))))))))
+
+(with-test (:name :muffled-compiler-conditions-for-eval-2)
+  (let ((sb-ext:*evaluator-mode* :compile)
+        (sb-ext:*muffled-evaluator-conditions* nil))
+    (assert (search "note:"
+                    (with-output-to-string (*error-output*)
+                      (eval '(lambda (x)
+                              (declare (optimize speed))
+                              (1+ x))))))))
+
+(with-test (:name :muffled-compiler-conditions-for-eval-3)
+  (let ((sb-ext:*evaluator-mode* :compile)
+        (sb-ext:*muffled-evaluator-conditions* 'style-warning))
+    (assert (not (search "STYLE-WARNING"
+                         (with-output-to-string (*error-output*)
+                           (eval '(lambda (x)))))))))

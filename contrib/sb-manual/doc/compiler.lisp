@@ -779,7 +779,8 @@
 
   Unlike in some other Lisp implementations, in SBCL, interpreted code
   is not safer or more debuggable than compiled code."
-  (sb-ext:*evaluator-mode* variable))
+  (sb-ext:*evaluator-mode* variable)
+  (sb-ext:*muffled-evaluator-conditions* variable))
 
 (defsection @advanced-compiler-use-and-efficiency-hints
     (:title "Advanced Compiler Use and Efficiency Hints")

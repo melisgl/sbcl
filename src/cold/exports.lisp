@@ -398,9 +398,11 @@
 
    "OCTETS-TO-STRING" "STRING-TO-OCTETS"
 
-   ;; Whether to use the interpreter or the compiler for EVAL
+   ;; Whether to use the interpreter or the compiler for EVAL and
+   ;; related knobs
 
    "*EVALUATOR-MODE*"
+   "*MUFFLED-EVALUATOR-CONDITIONS*"
 
    ;; timer
 

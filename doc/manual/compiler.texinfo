@@ -1234,6 +1234,14 @@ to @code{:interpret}, an interpreter will be used. @code{:interpret} is a valid
 value only if SBCL has been compiled with either the @code{sb-eval} or the
 @code{sb-fasteval} feature.
 @end deffn
+@anchor{Variable sb-ext *muffled-evaluator-conditions*}
+@vvindex @sortas{muffled-evaluator-conditions* sb-ext} *muffled-evaluator-conditions* [sb-ext]
+@deffn{Variable} sb-ext:*muffled-evaluator-conditions*
+WARNINGS, STYLE-WARNINGS and @code{compiler-note}s signalled by @code{eval} that
+match this type are muffled. Conditions signalled by the code being
+evaluated are not affected. Note that currently such conditions are
+signalled only when @code{sb-ext:*evaluator-mode*} is @code{:compile}.
+@end deffn
 @node advanced compiler use and efficiency hints
 @section Advanced Compiler Use and Efficiency Hints
 
