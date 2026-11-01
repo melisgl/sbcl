@@ -1120,55 +1120,71 @@ with that condition (or with no condition) will be returned."
 ;;; support the extension.)
 (define-condition unsupported-operator (simple-error) ())
 
-;;; (:ansi-cl :function remove)
-;;; (:ansi-cl :section (a b c))
-;;; (:ansi-cl :glossary "similar")
-;;;
-;;; (:sbcl :node "...")
-;;; (:sbcl :variable *ed-functions*)
 
-;;;
-;;; FIXME: this is not the right place for this.
-(defun print-reference (reference stream)
-  (ecase (car reference)
-    (:amop
-     (format stream "AMOP")
-     (format stream ", ")
-     (destructuring-bind (type data) (cdr reference)
-       (ecase type
-         (:readers "Readers for ~:(~A~) Metaobjects"
-                   (substitute #\  #\- (symbol-name data)))
-         (:initialization
-          (format stream "Initialization of ~:(~A~) Metaobjects"
-                  (substitute #\  #\- (symbol-name data))))
-         (:generic-function (format stream "Generic Function ~S" data))
-         (:function (format stream "Function ~S" data))
-         (:section (format stream "Section ~{~D~^.~}" data)))))
-    (:ansi-cl
-     (format stream "The ANSI Standard")
-     (format stream ", ")
-     (destructuring-bind (type data) (cdr reference)
-       (ecase type
-         (:function (format stream "Function ~S" data))
-         (:special-operator (format stream "Special Operator ~S" data))
-         (:macro (format stream "Macro ~S" data))
-         (:section (format stream "Section ~{~D~^.~}" data))
-         (:glossary (format stream "Glossary entry for ~S" data))
-         (:type (format stream "Type ~S" data))
-         (:system-class (format stream "System Class ~S" data))
-         (:issue (format stream "writeup for Issue ~A" data)))))
-    (:sbcl
-     (format stream "The SBCL Manual")
-     (format stream ", ")
-     (destructuring-bind (type data) (cdr reference)
-       (ecase type
-         (:node (format stream "Node ~S" data))
-         (:variable (format stream "Variable ~S" data))
-         (:function (format stream "Function ~S" data)))))
-    ;; FIXME: other documents (e.g. CLIM, Franz documentation :-)
-    ))
 (define-condition reference-condition ()
-  ((references :initarg :references :reader reference-condition-references)))
+  ;; REFERENCES is a list of elements like
+  ;;
+  ;;   (:ansi-cl :function remove)
+  ;;   (:ansi-cl :section (a b c))
+  ;;   (:ansi-cl :glossary "similar")
+  ;;
+  ;;   (:sbcl :node "...")
+  ;;   (:sbcl :variable *ed-functions*)
+  ;;   (:sbcl :section-name sb-manual:@customization-hooks-for-users)
+  ;;
+  ;; FIXME: other documents (e.g. CLIM, Franz documentation :-)
+  ((references :initarg :references :reader %reference-condition-references)))
+
+(defun reference-condition-references (c)
+  #+sb-doc
+  (add-sb-manual-section-to-references (%reference-condition-references c))
+  #-sb-doc
+  (%reference-condition-references c))
+
+#+sb-doc
+(defun manual-home-section-name-and-title (name locative)
+  (let ((package (find-package "SB-MANUAL")))
+    (when package
+      (when (eq locative :macro)
+        (setq locative (find-symbol "MACRO" package)))
+      (funcall (find-symbol "HOME-SECTION-NAME-AND-TITLE" package)
+               name locative))))
+
+#+sb-doc
+(defun add-sb-manual-section-to-references (references)
+  (if (find-package "SB-MANUAL")
+      (let ((new-refs ()))
+        (labels ((maybe-add-node (title)
+                   (when title
+                     (push `(:sbcl :node ,title) new-refs)))
+                 (maybe-add-section (section-name)
+                   (when section-name
+                     (push `(:sbcl :section ,section-name) new-refs)))
+                 (maybe-add-home-section (name locative)
+                   (multiple-value-bind (section-name section-title)
+                       (manual-home-section-name-and-title name locative)
+                     (maybe-add-node section-title)
+                     (maybe-add-section section-name))))
+          (dolist (reference references (reverse new-refs))
+            (push reference new-refs)
+            (when (eq (car reference) :sbcl)
+              (destructuring-bind (type data) (cdr reference)
+                (ecase type
+                  (:node
+                   ;; KLUDGE: All sections that we actually reference
+                   ;; have names that are a trivial transformation of
+                   ;; the title. -- MG, 2026-11-01.
+                   (maybe-add-section
+                    (find-symbol (format nil "@~A"
+                                         (substitute #\- #\Space
+                                                     (string-upcase data)))
+                                 (find-package "SB-MANUAL"))))
+                  (:variable
+                   (maybe-add-home-section data 'variable))
+                  (:function
+                   (maybe-add-home-section data 'function))))))))
+      references))
+
 (defvar *print-condition-references* t)
 
 (define-condition simple-reference-error (reference-condition simple-error)

@@ -820,9 +820,9 @@
          (string= "SB-" name :end2 3))))
 
 (defun describe-home-section (name locative stream)
-  (let ((package (find-package '#:sb-manual)))
-    (when package
-      (when (eq locative :macro)
-        (setq locative (find-symbol "MACRO" package)))
-      (funcall (find-symbol "DESCRIBE-HOME-SECTION" package)
-               name locative stream))))
+  #-sb-doc
+  (declare (ignore name locative stream))
+  #+sb-doc
+  (let ((section-name (manual-home-section-name-and-title name locative)))
+    (when section-name
+      (format stream "~@:_User manual section: ~S" section-name))))

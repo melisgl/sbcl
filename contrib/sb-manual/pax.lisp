@@ -252,12 +252,11 @@
                      (equal entry xref))
             (return-from home-section section)))))))
 
-;;; For DESCRIBE
-(defun describe-home-section (name locative stream)
-  (let ((home-section (ignore-errors (home-section (xref name locative)))))
-    (when home-section
-      (format stream "~@:_User manual section: ~S"
-              (section-name home-section)))))
+(defun home-section-name-and-title (name locative)
+  (let ((section (ignore-errors (home-section (xref name locative)))))
+    (when section
+      (values (section-name section)
+              (section-title section)))))
 
 
 ;;; DEFINE-CONCEPT names a set of index keys. When MARKDOWN-TO-TEXINFO
