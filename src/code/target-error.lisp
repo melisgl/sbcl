@@ -1137,53 +1137,13 @@ with that condition (or with no condition) will be returned."
 
 (defun reference-condition-references (c)
   #+sb-doc
-  (add-sb-manual-section-to-references (%reference-condition-references c))
+  (let ((package (find-package "SB-MANUAL")))
+    (if package
+        (funcall (find-symbol "ADD-SB-MANUAL-SECTION-TO-REFERENCES" package)
+                 (%reference-condition-references c))
+        (%reference-condition-references c)))
   #-sb-doc
   (%reference-condition-references c))
-
-#+sb-doc
-(defun manual-home-section-name-and-title (name locative)
-  (let ((package (find-package "SB-MANUAL")))
-    (when package
-      (when (eq locative :macro)
-        (setq locative (find-symbol "MACRO" package)))
-      (funcall (find-symbol "HOME-SECTION-NAME-AND-TITLE" package)
-               name locative))))
-
-#+sb-doc
-(defun add-sb-manual-section-to-references (references)
-  (if (find-package "SB-MANUAL")
-      (let ((new-refs ()))
-        (labels ((maybe-add-node (title)
-                   (when title
-                     (push `(:sbcl :node ,title) new-refs)))
-                 (maybe-add-section (section-name)
-                   (when section-name
-                     (push `(:sbcl :section ,section-name) new-refs)))
-                 (maybe-add-home-section (name locative)
-                   (multiple-value-bind (section-name section-title)
-                       (manual-home-section-name-and-title name locative)
-                     (maybe-add-node section-title)
-                     (maybe-add-section section-name))))
-          (dolist (reference references (reverse new-refs))
-            (push reference new-refs)
-            (when (eq (car reference) :sbcl)
-              (destructuring-bind (type data) (cdr reference)
-                (ecase type
-                  (:node
-                   ;; KLUDGE: All sections that we actually reference
-                   ;; have names that are a trivial transformation of
-                   ;; the title. -- MG, 2026-11-01.
-                   (maybe-add-section
-                    (find-symbol (format nil "@~A"
-                                         (substitute #\- #\Space
-                                                     (string-upcase data)))
-                                 (find-package "SB-MANUAL"))))
-                  (:variable
-                   (maybe-add-home-section data 'variable))
-                  (:function
-                   (maybe-add-home-section data 'function))))))))
-      references))
 
 (defvar *print-condition-references* t)
 

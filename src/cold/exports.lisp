@@ -895,7 +895,6 @@ possibly temporarily, because it might be used internally.")
    "LOAD-AS-SOURCE"
    "DESCRIPTOR-SAP"
    "DO-PACKED-VARINTS"
-   "MANUAL-HOME-SECTION-NAME-AND-TITLE"
 
    "CLOSURE-EXTRA-VALUES"
    "PACK-CLOSURE-EXTRA-VALUES"

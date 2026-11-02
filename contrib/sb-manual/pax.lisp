@@ -251,12 +251,6 @@
           (when (and (listp entry)
                      (equal entry xref))
             (return-from home-section section)))))))
-
-(defun home-section-name-and-title (name locative)
-  (let ((section (ignore-errors (home-section (xref name locative)))))
-    (when section
-      (values (section-name section)
-              (section-title section)))))
 
 
 ;;; DEFINE-CONCEPT names a set of index keys. When MARKDOWN-TO-TEXINFO
