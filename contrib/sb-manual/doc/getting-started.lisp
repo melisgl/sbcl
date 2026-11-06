@@ -322,12 +322,16 @@
     (dolist (feature-def (base-target-features))
       (destructuring-bind (feature default &key retain public documentation)
           feature-def
-        (declare (ignore default retain))
         (when public
           (assert documentation ()
                   "No documentation for public build feature ~S."
                   feature-def)
-          (format out "- ~S~%~%~A~&~%" feature
+          (format out "- ~S (~A~A)~%~%~A~&~%" feature
+                  (ecase default
+                    ((nil) "off")
+                    ((:auto) "dynamic")
+                    ((t) "on"))
+                  (if retain ", on *FEATURES*" "")
                   (prefix-lines "    "
                                 #+sb-doc
                                 (reindent-docstring documentation)
@@ -336,4 +340,9 @@
 
 (eval
  `(defsection @build-options (:title "Build Options")
+    "The following list is of the format 
+
+        `<option-name> (<default>, <feature>)`
+
+    where `<default>` is off, dynamic, or on, and `<feature>`"
     ,(feature-docstring)))
